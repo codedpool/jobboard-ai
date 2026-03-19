@@ -1,0 +1,87 @@
+import datetime as dt
+from typing import List
+
+import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.job_config import JobConfig
+from app.models.job_result import JobResult
+
+
+REMOTEOK_API_URL = "https://remoteok.com/api"
+
+
+def _normalize_remoteok_job(raw: dict, config_id) -> JobResult:
+    title = raw.get("position") or raw.get("title") or ""
+    company = raw.get("company") or ""
+    url = raw.get("url") or raw.get("apply_url") or ""
+    location = raw.get("location") or "remote"
+    description = raw.get("description") or ""
+    created_at_str = raw.get("date") or raw.get("created_at")
+
+    created_at = None
+    if created_at_str:
+        try:
+            created_at = dt.datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        except Exception:
+            created_at = None
+
+    return JobResult(
+        config_id=config_id,
+        title=title[:255],
+        company=company[:255],
+        url=url,
+        source="remoteok",
+        location=location[:255],
+        description=description,
+        score=None,
+        reason=None,
+        created_at=created_at,
+    )
+
+
+def _matches_keywords(job: dict, keywords: list[str]) -> bool:
+    if not keywords:
+        return True
+    text = " ".join(
+        [
+            job.get("position") or "",
+            job.get("title") or "",
+            job.get("company") or "",
+            job.get("tags") and " ".join(job.get("tags")) or "",
+            job.get("description") or "",
+        ]
+    ).lower()
+    return all(k.lower() in text for k in keywords)
+
+
+async def fetch_remoteok_jobs(
+    config: JobConfig,
+    db: AsyncSession,
+    max_jobs: int = 50,
+) -> List[JobResult]:
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(REMOTEOK_API_URL, headers={"Accept": "application/json"})
+        resp.raise_for_status()
+        data = resp.json()
+
+    # First element is often API metadata, skip non-dict items
+    jobs_raw = [j for j in data if isinstance(j, dict)]
+
+    filtered = [
+        j for j in jobs_raw if _matches_keywords(j, config.keywords or [])
+    ][:max_jobs]
+
+    results: List[JobResult] = []
+    for raw in filtered:
+        jr = _normalize_remoteok_job(raw, config.id)
+        # basic dedupe by url+source
+        if not jr.url:
+            continue
+        results.append(jr)
+
+    for r in results:
+        db.add(r)
+
+    await db.flush()  # assign IDs
+    return results

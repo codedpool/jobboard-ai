@@ -8,6 +8,7 @@ from app.db.init_db import init_models
 from app.routes.me import router as me_router
 from app.routes.parse_query import router as parse_query_router
 from app.routes.configs import router as configs_router
+from app.routes.fetch import router as fetch_router
 
 app = FastAPI(title="Job Board AI API", version="1.0.0")
 
@@ -29,6 +30,7 @@ async def on_startup() -> None:
 app.include_router(me_router)
 app.include_router(parse_query_router)
 app.include_router(configs_router)
+app.include_router(fetch_router)
 
 
 @app.get("/health")
