@@ -1,11 +1,5 @@
 import { getAuth } from "@clerk/nextjs/server";
-import {
-  streamText,
-  createUIMessageStream,
-  createUIMessageStreamResponse,
-  convertToModelMessages,
-  generateId,
-} from "ai";
+import { streamText, convertToModelMessages } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 export const maxDuration = 30;
@@ -56,9 +50,8 @@ function extractPlatforms(text) {
 }
 
 /**
- * Extract plain text from an AI SDK v6 UIMessage.
- * In v6, message content lives in `parts` as { type: "text", text: string } objects.
- * Falls back to a plain `content` string for any legacy/edge cases.
+ * Extract plain text from a message object.
+ * Supports both { content: string } and AI SDK v6 { parts: [...] } format.
  */
 function getMessageText(message) {
   if (!message) return "";
@@ -72,7 +65,6 @@ function getMessageText(message) {
     if (fromParts) return fromParts;
   }
 
-  // Fallback for plain string content
   if (typeof message.content === "string") return message.content.trim();
 
   return "";
@@ -87,33 +79,29 @@ function lastAssistantAskedForPlatforms(messages) {
 }
 
 /**
- * Wrap a static text string in an AI SDK v6 UI message stream response.
- * Uses the text-start / text-delta / text-end chunk protocol expected by
- * DefaultChatTransport (useChat) in @ai-sdk/react v3 / ai v6.
+ * Return a static text as a plain text response.
  */
-function textToStream(text) {
-  const id = generateId();
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      writer.write({ type: "text-start", id });
-      writer.write({ type: "text-delta", id, delta: text });
-      writer.write({ type: "text-end", id });
-    },
+function textResponse(text) {
+  return new Response(text, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
-  return createUIMessageStreamResponse({ stream });
 }
 
 /**
- * Forward the conversation to Groq and stream back the response using
- * the AI SDK v6 UI message stream protocol so the browser can consume it.
+ * Forward the conversation to Groq and stream back the response
+ * as a plain text stream that the custom useChat hook can consume.
  */
 async function handleGenericGroq(messages, system) {
   const systemPrompt =
     system ||
     "You are a job board AI assistant. Help users find jobs, refine their search, and manage job-search agents.";
 
-  // Convert AI SDK v6 UIMessage[] → CoreMessage[] expected by streamText
-  const modelMessages = await convertToModelMessages(messages);
+  // Convert messages to CoreMessage format for streamText
+  // Our custom hook sends { role, content } — convert to the format streamText expects
+  const modelMessages = messages.map((m) => ({
+    role: m.role,
+    content: m.content || "",
+  }));
 
   const result = streamText({
     model: groqProvider("llama-3.3-70b-versatile"),
@@ -121,14 +109,15 @@ async function handleGenericGroq(messages, system) {
     messages: modelMessages,
   });
 
-  return result.toUIMessageStreamResponse();
+  // Use toTextStreamResponse() for proper streaming
+  return result.toTextStreamResponse();
 }
 
 // --- Main route ---
 
 export async function POST(req) {
   const body = await req.json();
-  const { messages, system } = body;
+  const { messages, system, threadId } = body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response(JSON.stringify({ error: "No messages provided" }), {
@@ -165,7 +154,7 @@ export async function POST(req) {
 
   if (wantsJobs) {
     if (!clerkToken) {
-      return textToStream("⚠️ You need to sign in to see your saved jobs.");
+      return textResponse("⚠️ You need to sign in to see your saved jobs.");
     }
     try {
       const configsRes = await fetch(`${BACKEND_URL}/api/configs`, {
@@ -175,12 +164,11 @@ export async function POST(req) {
       const configs = await configsRes.json();
 
       if (!configs || configs.length === 0) {
-        return textToStream(
+        return textResponse(
           "You haven't set up any job tracking agents yet! Try saying 'Find me a backend job'.",
         );
       }
 
-      // Simplest: use the latest config (assuming last in the array is the most recent)
       const latestConfig = configs[configs.length - 1];
       const configId = latestConfig.id;
 
@@ -195,7 +183,7 @@ export async function POST(req) {
 
       const rawJobs = results.jobs || [];
       if (rawJobs.length === 0) {
-        return textToStream(
+        return textResponse(
           "No jobs found yet for your latest agent. Try triggering a fetch first!",
         );
       }
@@ -217,10 +205,10 @@ export async function POST(req) {
       const hidden = `<!--JOBS:${JSON.stringify(jobsPayload)}-->`;
       const content = `Here are your latest ${jobsPayload.jobs.length} jobs:\n\n${hidden}`;
 
-      return textToStream(content);
+      return textResponse(content);
     } catch (err) {
       console.error("Error fetching jobs:", err);
-      return textToStream(
+      return textResponse(
         "⚠️ Oops, something went wrong fetching your jobs. Please try again.",
       );
     }
@@ -233,7 +221,6 @@ export async function POST(req) {
   ) {
     const platforms = extractPlatforms(lastText);
 
-    // Retrieve the parsed job data that was stashed in the previous assistant msg
     const assistantMsgs = messages.filter((m) => m.role === "assistant");
     const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
     const lastAssistantText = getMessageText(lastAssistant);
@@ -263,25 +250,25 @@ export async function POST(req) {
           }),
         });
       } catch (_) {
-        return textToStream(
+        return textResponse(
           "⚠️ I couldn't reach the server to save your job config. Please try again in a moment.",
         );
       }
 
       if (configRes.ok) {
         const platformList = platforms.join(", ");
-        return textToStream(
+        return textResponse(
           `✅ Agent created for **${parsedData.parsed_role}** on **${platformList}**.\n\nI'll start scanning these platforms and surface matching jobs here. You can refine further by saying things like "only remote", "more senior", or "exclude React".`,
         );
       } else {
-        return textToStream(
+        return textResponse(
           "⚠️ I couldn't save your job config. Make sure you're signed in and try again.",
         );
       }
     }
 
     const platformList = platforms.join(", ") || lastText;
-    return textToStream(
+    return textResponse(
       `✅ Got it — I'll look for jobs on **${platformList}**. (Sign in to save this agent permanently.)`,
     );
   }
@@ -318,7 +305,7 @@ export async function POST(req) {
       `Just reply with the platform names, e.g. \`remoteok, remotive, github\`\n` +
       `<!--PARSED:${JSON.stringify({ ...parsed, raw_query: lastText })}-->`;
 
-    return textToStream(responseText);
+    return textResponse(responseText);
   }
 
   // ── FLOW 3: Generic conversational chat via Groq ────────────────────────────

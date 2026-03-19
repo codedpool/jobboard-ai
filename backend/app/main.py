@@ -11,6 +11,7 @@ from app.routes.configs import router as configs_router
 from app.routes.fetch import router as fetch_router
 from app.routes import evaluate as evaluate_routes
 from app.routes import results as results_routes
+from app.routes.threads import router as threads_router
 
 app = FastAPI(title="Job Board AI API", version="1.0.0")
 
@@ -35,6 +36,7 @@ app.include_router(configs_router)
 app.include_router(fetch_router)
 app.include_router(evaluate_routes.router)
 app.include_router(results_routes.router)
+app.include_router(threads_router)
 
 
 @app.get("/health")
