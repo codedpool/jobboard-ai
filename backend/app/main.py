@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -7,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import engine, get_db
 from app.db.init_db import init_models
+from app.routes.me import router as me_router
 
 app = FastAPI(title="Job Board AI API", version="1.0.0")
 
@@ -23,6 +22,9 @@ app.add_middleware(
 async def on_startup() -> None:
     # create tables if they do not exist
     await init_models(engine)
+
+
+app.include_router(me_router)
 
 
 @app.get("/health")
