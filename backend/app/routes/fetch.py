@@ -11,6 +11,9 @@ from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
 from app.services.remoteok_fetcher import fetch_remoteok_jobs
 from app.services.remotive_fetcher import fetch_remotive_jobs
+from app.services.hn_fetcher import fetch_hn_jobs
+from app.services.github_fetcher import fetch_github_jobs
+from app.services.yc_fetcher import fetch_yc_jobs
 
 router = APIRouter(prefix="/api", tags=["fetch"])
 
@@ -55,15 +58,30 @@ async def fetch_jobs_for_config(
 
     all_results: List[JobResult] = []
 
-    # Phase 6.1: RemoteOK
+    # RemoteOK
     remoteok_results = await fetch_remoteok_jobs(config, db)
     all_results.extend(remoteok_results)
 
-    # Phase 6.2: Remotive
+    # Remotive
     remotive_results = await fetch_remotive_jobs(config, db)
     all_results.extend(remotive_results)
 
-    # Commit everything
+    # HN "Who's Hiring"
+    hn_results = await fetch_hn_jobs(config, db)
+    all_results.extend(hn_results)
+
+    # GitHub issues/discussions
+    github_results = await fetch_github_jobs(config, db)
+    all_results.extend(github_results)
+
+    # YC job board (best-effort, non-blocking)
+    yc_results = []
+    try:
+        yc_results = await fetch_yc_jobs(config, db)
+    except Exception:
+        # YC scraping can fail; keep going
+        yc_results = []
+
     await db.commit()
 
     return {
@@ -71,7 +89,9 @@ async def fetch_jobs_for_config(
         "counts": {
             "remoteok": len(remoteok_results),
             "remotive": len(remotive_results),
-            # further sources in later subphases
+            "hn": len(hn_results),
+            "github": len(github_results),
+            "yc": len(yc_results),
         },
         "total_inserted": len(all_results),
         "jobs": [_job_result_to_dict(j) for j in all_results],
