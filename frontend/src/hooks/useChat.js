@@ -63,13 +63,16 @@ export function useChat({ threadId }) {
    * Save a single message to the backend.
    */
   const persistMessage = useCallback(async (tid, role, content) => {
-    if (!tid) return;
+    if (!tid || tid.startsWith("draft-")) return;
     try {
-      await fetch(`/api/threads/${tid}/messages`, {
+      const res = await fetch(`/api/threads/${tid}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role, content }),
       });
+      if (!res.ok) {
+        console.error("Failed to persist message:", res.status);
+      }
     } catch (err) {
       console.error("Failed to persist message:", err);
     }
@@ -162,11 +165,13 @@ export function useChat({ threadId }) {
           });
         }
 
-        // Persist assistant message to backend
-        await persistMessage(tid, "assistant", fullContent);
+        // Persist assistant message to backend (don't block on failure)
+        persistMessage(tid, "assistant", fullContent).catch((err) => {
+          console.error("Failed to persist assistant message:", err);
+        });
 
-        // Reload history from backend to stay in sync
-        await loadHistory(tid);
+        // Note: We don't reload history here since we already have the messages locally
+        // This avoids potential auth issues with long-running requests
       } catch (err) {
         if (err.name === "AbortError") {
           // User cancelled — that's fine

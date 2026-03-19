@@ -150,6 +150,8 @@ export async function POST(req) {
     lowerText.includes("show jobs") ||
     lowerText.includes("show results") ||
     lowerText.includes("show my jobs") ||
+    lowerText.includes("find jobs") ||
+    lowerText.includes("get jobs") ||
     lowerText.includes("list jobs");
 
   if (wantsJobs) {
@@ -157,21 +159,66 @@ export async function POST(req) {
       return textResponse("⚠️ You need to sign in to see your saved jobs.");
     }
     try {
-      const configsRes = await fetch(`${BACKEND_URL}/api/configs`, {
-        headers: authHeaders,
-      });
-      if (!configsRes.ok) throw new Error("Failed to fetch configs");
-      const configs = await configsRes.json();
-
-      if (!configs || configs.length === 0) {
-        return textResponse(
-          "You haven't set up any job tracking agents yet! Try saying 'Find me a backend job'.",
-        );
+      // Look for config ID in conversation context first
+      let configId = null;
+      for (const msg of messages) {
+        const text = getMessageText(msg);
+        const configMatch = text.match(/<!--CONFIG_ID:([a-f0-9-]+)-->/);
+        if (configMatch) {
+          configId = configMatch[1];
+        }
       }
 
-      const latestConfig = configs[configs.length - 1];
-      const configId = latestConfig.id;
+      // If no config in conversation, get the most recent one
+      if (!configId) {
+        const configsRes = await fetch(`${BACKEND_URL}/api/configs`, {
+          headers: authHeaders,
+        });
+        if (!configsRes.ok) throw new Error("Failed to fetch configs");
+        const configs = await configsRes.json();
 
+        if (!configs || configs.length === 0) {
+          return textResponse(
+            "You haven't set up any job tracking agents yet! Try saying something like:\n\n" +
+            "• \"Find me remote Python jobs\"\n" +
+            "• \"Search for frontend developer positions\"\n" +
+            "• \"Look for backend engineer roles\"",
+          );
+        }
+
+        // Use the most recent config
+        configId = configs[0].id;
+      }
+
+      // Step 1: Fetch fresh jobs from platforms
+      const fetchRes = await fetch(
+        `${BACKEND_URL}/api/configs/${configId}/fetch`,
+        {
+          method: "POST",
+          headers: authHeaders,
+        },
+      );
+      
+      let fetchData = { total_inserted: 0 };
+      if (fetchRes.ok) {
+        fetchData = await fetchRes.json();
+      }
+
+      // Step 2: Evaluate the jobs
+      const evalRes = await fetch(
+        `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=20`,
+        {
+          method: "POST",
+          headers: authHeaders,
+        },
+      );
+      
+      let evalData = { evaluated: 0 };
+      if (evalRes.ok) {
+        evalData = await evalRes.json();
+      }
+
+      // Step 3: Get the results (sorted by score)
       const resultsRes = await fetch(
         `${BACKEND_URL}/api/configs/${configId}/results?limit=10`,
         {
@@ -184,13 +231,21 @@ export async function POST(req) {
       const rawJobs = results.jobs || [];
       if (rawJobs.length === 0) {
         return textResponse(
-          "No jobs found yet for your latest agent. Try triggering a fetch first!",
+          `I searched the platforms but didn't find any matching jobs yet.\n\n` +
+          `Fetched: ${fetchData.total_inserted || 0} new listings\n` +
+          `Try broadening your search criteria or check back later!`,
         );
       }
 
+      // Sort by score (highest first) and filter to good matches
+      const sortedJobs = rawJobs
+        .filter((j) => j.score !== null)
+        .sort((a, b) => (b.score || 0) - (a.score || 0))
+        .slice(0, 10);
+
       const jobsPayload = {
         config_id: configId,
-        jobs: rawJobs.map((job) => ({
+        jobs: sortedJobs.map((job) => ({
           id: job.id,
           title: job.title,
           company: job.company,
@@ -203,7 +258,10 @@ export async function POST(req) {
       };
 
       const hidden = `<!--JOBS:${JSON.stringify(jobsPayload)}-->`;
-      const content = `Here are your latest ${jobsPayload.jobs.length} jobs:\n\n${hidden}`;
+      const statusLine = fetchData.total_inserted > 0 
+        ? `🔍 Found **${fetchData.total_inserted}** new listings, evaluated **${evalData.evaluated}** jobs.\n\n`
+        : "";
+      const content = `${statusLine}Here are your top ${jobsPayload.jobs.length} matching jobs:\n\n${hidden}`;
 
       return textResponse(content);
     } catch (err) {
@@ -256,9 +314,12 @@ export async function POST(req) {
       }
 
       if (configRes.ok) {
+        const configData = await configRes.json();
         const platformList = platforms.join(", ");
         return textResponse(
-          `✅ Agent created for **${parsedData.parsed_role}** on **${platformList}**.\n\nI'll start scanning these platforms and surface matching jobs here. You can refine further by saying things like "only remote", "more senior", or "exclude React".`,
+          `✅ Agent created for **${parsedData.parsed_role}** on **${platformList}**.\n\n` +
+          `Say **"show jobs"** to fetch and see matching positions!\n\n` +
+          `<!--CONFIG_ID:${configData.id}-->`,
         );
       } else {
         return textResponse(
