@@ -1,37 +1,33 @@
 "use client";
 
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import {
-  useChatRuntime,
-  AssistantChatTransport,
-} from "@assistant-ui/react-ai-sdk";
-import { Thread } from "@/components/assistant-ui/thread";
-import { ThreadList } from "@/components/assistant-ui/thread-list";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { useUser } from "@clerk/nextjs";
 
 export default function HomePage() {
-  const runtime = useChatRuntime({
-    transport: new AssistantChatTransport({
-      api: "/api/chat",
-    }),
-  });
+  const { isSignedIn } = useUser();
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <div className="flex h-screen bg-background">
-        <div className="w-64 border-r border-border flex flex-col">
-          <div className="p-4 border-b border-border">
-            <h1 className="text-sm font-semibold text-foreground">
-              Job Board AI
-            </h1>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            <ThreadList />
-          </div>
-        </div>
-        <div className="flex-1 flex flex-col">
-          <Thread />
-        </div>
+    <main className="flex h-screen flex-col items-center justify-center gap-6 bg-background">
+      <div className="space-y-2 text-center">
+        <h1 className="text-3xl font-bold">Job Board AI Aggregator</h1>
+        <p className="text-muted-foreground max-w-md">
+          Chat-first job search. Aggregate jobs across multiple platforms and
+          let an agent keep tracking them for you.
+        </p>
       </div>
-    </AssistantRuntimeProvider>
+      <div className="flex gap-3">
+        <Button asChild>
+          <Link href={isSignedIn ? "/dashboard" : "/sign-in"}>
+            {isSignedIn ? "Go to dashboard" : "Sign in to get started"}
+          </Link>
+        </Button>
+        {!isSignedIn && (
+          <Button asChild variant="outline">
+            <Link href="/sign-up">Create account</Link>
+          </Button>
+        )}
+      </div>
+    </main>
   );
 }
