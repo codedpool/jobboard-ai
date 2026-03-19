@@ -9,10 +9,10 @@ from app.auth.deps import get_clerk_auth
 from app.db.session import get_db
 from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
+from app.services.github_fetcher import fetch_github_jobs
+from app.services.hn_fetcher import fetch_hn_jobs
 from app.services.remoteok_fetcher import fetch_remoteok_jobs
 from app.services.remotive_fetcher import fetch_remotive_jobs
-from app.services.hn_fetcher import fetch_hn_jobs
-from app.services.github_fetcher import fetch_github_jobs
 from app.services.yc_fetcher import fetch_yc_jobs
 
 router = APIRouter(prefix="/api", tags=["fetch"])
@@ -45,9 +45,7 @@ async def fetch_jobs_for_config(
         raise HTTPException(status_code=401, detail="Invalid token: no sub claim")
 
     # Load config and ensure it belongs to this user
-    result = await db.execute(
-        select(JobConfig).where(JobConfig.id == config_id)
-    )
+    result = await db.execute(select(JobConfig).where(JobConfig.id == config_id))
     config = result.scalar_one_or_none()
 
     if not config:
@@ -58,31 +56,35 @@ async def fetch_jobs_for_config(
 
     all_results: List[JobResult] = []
 
-    # RemoteOK
-    remoteok_results = await fetch_remoteok_jobs(config, db)
+    # ── RemoteOK ────────────────────────────────────────────────────────────────
+    remoteok_results, remoteok_skipped = await fetch_remoteok_jobs(config, db)
     all_results.extend(remoteok_results)
 
-    # Remotive
-    remotive_results = await fetch_remotive_jobs(config, db)
+    # ── Remotive ────────────────────────────────────────────────────────────────
+    remotive_results, remotive_skipped = await fetch_remotive_jobs(config, db)
     all_results.extend(remotive_results)
 
-    # HN "Who's Hiring"
-    hn_results = await fetch_hn_jobs(config, db)
+    # ── HN "Who's Hiring" ───────────────────────────────────────────────────────
+    hn_results, hn_skipped = await fetch_hn_jobs(config, db)
     all_results.extend(hn_results)
 
-    # GitHub issues/discussions
-    github_results = await fetch_github_jobs(config, db)
+    # ── GitHub hiring issues ─────────────────────────────────────────────────────
+    github_results, github_skipped = await fetch_github_jobs(config, db)
     all_results.extend(github_results)
 
-    # YC job board (best-effort, non-blocking)
-    yc_results = []
+    # ── YC job board (stub – best-effort, non-blocking) ──────────────────────────
+    yc_results: List[JobResult] = []
+    yc_skipped = 0
     try:
-        yc_results = await fetch_yc_jobs(config, db)
+        yc_results, yc_skipped = await fetch_yc_jobs(config, db)
     except Exception:
-        # YC scraping can fail; keep going
-        yc_results = []
+        pass
 
     await db.commit()
+
+    total_skipped = (
+        remoteok_skipped + remotive_skipped + hn_skipped + github_skipped + yc_skipped
+    )
 
     return {
         "config_id": str(config.id),
@@ -93,6 +95,14 @@ async def fetch_jobs_for_config(
             "github": len(github_results),
             "yc": len(yc_results),
         },
+        "skipped": {
+            "remoteok": remoteok_skipped,
+            "remotive": remotive_skipped,
+            "hn": hn_skipped,
+            "github": github_skipped,
+            "yc": yc_skipped,
+        },
         "total_inserted": len(all_results),
+        "total_skipped": total_skipped,
         "jobs": [_job_result_to_dict(j) for j in all_results],
     }

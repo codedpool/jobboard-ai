@@ -28,4 +28,5 @@ class JobResult(Base):
     description = Column(Text, nullable=True)
     score = Column(Integer, nullable=True)
     reason = Column(Text, nullable=True)
+    dedupe_key = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

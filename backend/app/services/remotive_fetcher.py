@@ -1,12 +1,12 @@
 import datetime as dt
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
-
+from app.services.dedupe import compute_dedupe_key, filter_new_jobs
 
 REMOTIVE_API_URL = "https://remotive.com/api/remote-jobs"
 
@@ -58,11 +58,16 @@ async def fetch_remotive_jobs(
     config: JobConfig,
     db: AsyncSession,
     max_jobs: int = 50,
-) -> List[JobResult]:
-    params = {}
-    # We could add category filtering later if needed
+) -> Tuple[List[JobResult], int]:
+    """
+    Fetch jobs from Remotive, skipping any that are already stored for this
+    config (dedupe by source + title + company + URL).
+
+    Returns:
+        (inserted_jobs, skipped_count)
+    """
     async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(REMOTIVE_API_URL, params=params)
+        resp = await client.get(REMOTIVE_API_URL)
         resp.raise_for_status()
         data = resp.json()
 
@@ -72,15 +77,20 @@ async def fetch_remotive_jobs(
         j for j in jobs_raw if _matches_keywords_remotive(j, config.keywords or [])
     ][:max_jobs]
 
-    results: List[JobResult] = []
+    # Build candidate JobResult objects (not yet added to the session).
+    candidates: List[JobResult] = []
     for raw in filtered:
         jr = _normalize_remotive_job(raw, config.id)
         if not jr.url:
             continue
-        results.append(jr)
+        jr.dedupe_key = compute_dedupe_key(jr)
+        candidates.append(jr)
 
-    for r in results:
-        db.add(r)
+    # Drop any candidates that already exist in the DB for this config.
+    new_jobs, skipped = await filter_new_jobs(db, config.id, candidates)
 
-    await db.flush()
-    return results
+    for job in new_jobs:
+        db.add(job)
+
+    await db.flush()  # assign DB-generated IDs
+    return new_jobs, skipped

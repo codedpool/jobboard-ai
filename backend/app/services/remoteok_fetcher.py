@@ -1,12 +1,12 @@
 import datetime as dt
-from typing import List
+from typing import List, Tuple
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
-
+from app.services.dedupe import compute_dedupe_key, filter_new_jobs
 
 REMOTEOK_API_URL = "https://remoteok.com/api"
 
@@ -22,7 +22,9 @@ def _normalize_remoteok_job(raw: dict, config_id) -> JobResult:
     created_at = None
     if created_at_str:
         try:
-            created_at = dt.datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            created_at = dt.datetime.fromisoformat(
+                created_at_str.replace("Z", "+00:00")
+            )
         except Exception:
             created_at = None
 
@@ -59,29 +61,42 @@ async def fetch_remoteok_jobs(
     config: JobConfig,
     db: AsyncSession,
     max_jobs: int = 50,
-) -> List[JobResult]:
+) -> Tuple[List[JobResult], int]:
+    """
+    Fetch jobs from RemoteOK, skipping any that are already stored for this
+    config (dedupe by source + title + company + URL).
+
+    Returns:
+        (inserted_jobs, skipped_count)
+    """
     async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(REMOTEOK_API_URL, headers={"Accept": "application/json"})
+        resp = await client.get(
+            REMOTEOK_API_URL, headers={"Accept": "application/json"}
+        )
         resp.raise_for_status()
         data = resp.json()
 
-    # First element is often API metadata, skip non-dict items
+    # First element is often API metadata — skip non-dict items.
     jobs_raw = [j for j in data if isinstance(j, dict)]
 
-    filtered = [
-        j for j in jobs_raw if _matches_keywords(j, config.keywords or [])
-    ][:max_jobs]
+    filtered = [j for j in jobs_raw if _matches_keywords(j, config.keywords or [])][
+        :max_jobs
+    ]
 
-    results: List[JobResult] = []
+    # Build candidate JobResult objects (not yet added to the session).
+    candidates: List[JobResult] = []
     for raw in filtered:
         jr = _normalize_remoteok_job(raw, config.id)
-        # basic dedupe by url+source
         if not jr.url:
             continue
-        results.append(jr)
+        jr.dedupe_key = compute_dedupe_key(jr)
+        candidates.append(jr)
 
-    for r in results:
-        db.add(r)
+    # Drop any candidates that already exist in the DB for this config.
+    new_jobs, skipped = await filter_new_jobs(db, config.id, candidates)
 
-    await db.flush()  # assign IDs
-    return results
+    for job in new_jobs:
+        db.add(job)
+
+    await db.flush()  # assign DB-generated IDs
+    return new_jobs, skipped
