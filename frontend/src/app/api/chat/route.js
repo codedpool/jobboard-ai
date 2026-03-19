@@ -156,6 +156,76 @@ export async function POST(req) {
       }
     : { "Content-Type": "application/json" };
 
+  const lowerText = lastText.toLowerCase();
+  const wantsJobs =
+    lowerText.includes("show jobs") ||
+    lowerText.includes("show results") ||
+    lowerText.includes("show my jobs") ||
+    lowerText.includes("list jobs");
+
+  if (wantsJobs) {
+    if (!clerkToken) {
+      return textToStream("⚠️ You need to sign in to see your saved jobs.");
+    }
+    try {
+      const configsRes = await fetch(`${BACKEND_URL}/api/configs`, {
+        headers: authHeaders,
+      });
+      if (!configsRes.ok) throw new Error("Failed to fetch configs");
+      const configs = await configsRes.json();
+
+      if (!configs || configs.length === 0) {
+        return textToStream(
+          "You haven't set up any job tracking agents yet! Try saying 'Find me a backend job'.",
+        );
+      }
+
+      // Simplest: use the latest config (assuming last in the array is the most recent)
+      const latestConfig = configs[configs.length - 1];
+      const configId = latestConfig.id;
+
+      const resultsRes = await fetch(
+        `${BACKEND_URL}/api/configs/${configId}/results?limit=10`,
+        {
+          headers: authHeaders,
+        },
+      );
+      if (!resultsRes.ok) throw new Error("Failed to fetch results");
+      const results = await resultsRes.json();
+
+      const rawJobs = results.jobs || [];
+      if (rawJobs.length === 0) {
+        return textToStream(
+          "No jobs found yet for your latest agent. Try triggering a fetch first!",
+        );
+      }
+
+      const jobsPayload = {
+        config_id: configId,
+        jobs: rawJobs.map((job) => ({
+          id: job.id,
+          title: job.title,
+          company: job.company,
+          url: job.url,
+          source: job.source,
+          location: job.location,
+          score: job.score,
+          reason: job.reason,
+        })),
+      };
+
+      const hidden = `<!--JOBS:${JSON.stringify(jobsPayload)}-->`;
+      const content = `Here are your latest ${jobsPayload.jobs.length} jobs:\n\n${hidden}`;
+
+      return textToStream(content);
+    } catch (err) {
+      console.error("Error fetching jobs:", err);
+      return textToStream(
+        "⚠️ Oops, something went wrong fetching your jobs. Please try again.",
+      );
+    }
+  }
+
   // ── FLOW 1: User is answering the "which platforms?" follow-up ──────────────
   if (
     isPlatformListMessage(lastText) &&
