@@ -10,6 +10,7 @@ export default function DevPage() {
   const [loadingConfigs, setLoadingConfigs] = useState(false);
   const [fetchingId, setFetchingId] = useState(null);
   const [evaluatingId, setEvaluatingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [lastEvalResult, setLastEvalResult] = useState(null);
   const [resultsId, setResultsId] = useState(null);
@@ -94,6 +95,32 @@ export default function DevPage() {
     }
   }
 
+  async function deleteConfig(configId) {
+    setDeletingId(configId);
+    setError("");
+    try {
+      const res = await fetch(`/api/dev/configs/${configId}`, {
+        method: "DELETE",
+      });
+
+      // Even if config returns 404, it's already deleted on the backend,
+      // so remove it from the UI without showing an error
+      if (res.status === 404 || res.ok) {
+        setConfigs(configs.filter((c) => c.id !== configId));
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || data.error || `Error ${res.status}`);
+      }
+    } catch (e) {
+      setError(e.message || "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   useEffect(() => {
     if (isSignedIn) {
       loadConfigs();
@@ -172,6 +199,14 @@ export default function DevPage() {
                     disabled={resultsId === c.id}
                   >
                     {resultsId === c.id ? "Loading..." : "View Results"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => deleteConfig(c.id)}
+                    disabled={deletingId === c.id}
+                  >
+                    {deletingId === c.id ? "Deleting..." : "Delete"}
                   </Button>
                 </div>
               </div>

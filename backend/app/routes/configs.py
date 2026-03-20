@@ -107,3 +107,30 @@ async def list_configs(
         )
         for c in configs
     ]
+
+
+@router.delete("/configs/{config_id}")
+async def delete_config(
+    config_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(get_clerk_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = credentials.decoded.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token: no sub claim")
+
+    result = await db.execute(
+        select(JobConfig).where(
+            JobConfig.id == config_id,
+            JobConfig.user_id == user_id,
+        )
+    )
+    config = result.scalar_one_or_none()
+
+    if not config:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    await db.delete(config)
+    await db.commit()
+
+    return {"message": "Config deleted successfully"}

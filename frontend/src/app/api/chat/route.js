@@ -79,10 +79,33 @@ function lastAssistantAskedForPlatforms(messages) {
 }
 
 /**
- * Return a static text as a plain text response.
+ * Return a static text as a streaming response.
+ * Chunks the text to simulate token-by-token streaming (typing effect).
  */
 function textResponse(text) {
-  return new Response(text, {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      // Split into chunks (words or sentences) for a more natural typing effect
+      // Split by spaces and punctuation
+      const chunks = text.match(/\S+\s*/g) || [];
+
+      let index = 0;
+      const push = () => {
+        if (index < chunks.length) {
+          const chunk = chunks[index++];
+          controller.enqueue(encoder.encode(chunk));
+          // Small delay to simulate typing
+          setTimeout(push, 10);
+        } else {
+          controller.close();
+        }
+      };
+      push();
+    },
+  });
+
+  return new Response(stream, {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
 }
@@ -180,9 +203,9 @@ export async function POST(req) {
         if (!configs || configs.length === 0) {
           return textResponse(
             "You haven't set up any job tracking agents yet! Try saying something like:\n\n" +
-            "• \"Find me remote Python jobs\"\n" +
-            "• \"Search for frontend developer positions\"\n" +
-            "• \"Look for backend engineer roles\"",
+              '• "Find me remote Python jobs"\n' +
+              '• "Search for frontend developer positions"\n' +
+              '• "Look for backend engineer roles"',
           );
         }
 
@@ -198,21 +221,22 @@ export async function POST(req) {
           headers: authHeaders,
         },
       );
-      
+
       let fetchData = { total_inserted: 0 };
       if (fetchRes.ok) {
         fetchData = await fetchRes.json();
       }
 
-      // Step 2: Evaluate the jobs
+      // Step 2: Evaluate the jobs (use total_inserted to ensure all are evaluated)
+      const evalLimit = Math.max(20, fetchData.total_inserted || 0);
       const evalRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=20`,
+        `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=${evalLimit}`,
         {
           method: "POST",
           headers: authHeaders,
         },
       );
-      
+
       let evalData = { evaluated: 0 };
       if (evalRes.ok) {
         evalData = await evalRes.json();
@@ -220,7 +244,7 @@ export async function POST(req) {
 
       // Step 3: Get the results (sorted by score)
       const resultsRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/results?limit=10`,
+        `${BACKEND_URL}/api/configs/${configId}/results?limit=50`,
         {
           headers: authHeaders,
         },
@@ -232,8 +256,8 @@ export async function POST(req) {
       if (rawJobs.length === 0) {
         return textResponse(
           `I searched the platforms but didn't find any matching jobs yet.\n\n` +
-          `Fetched: ${fetchData.total_inserted || 0} new listings\n` +
-          `Try broadening your search criteria or check back later!`,
+            `Fetched: ${fetchData.total_inserted || 0} new listings\n` +
+            `Try broadening your search criteria or check back later!`,
         );
       }
 
@@ -258,9 +282,10 @@ export async function POST(req) {
       };
 
       const hidden = `<!--JOBS:${JSON.stringify(jobsPayload)}-->`;
-      const statusLine = fetchData.total_inserted > 0 
-        ? `🔍 Found **${fetchData.total_inserted}** new listings, evaluated **${evalData.evaluated}** jobs.\n\n`
-        : "";
+      const statusLine =
+        fetchData.total_inserted > 0
+          ? `🔍 Found **${fetchData.total_inserted}** new listings, evaluated **${evalData.evaluated}** jobs.\n\n`
+          : "";
       const content = `${statusLine}Here are your top ${jobsPayload.jobs.length} matching jobs:\n\n${hidden}`;
 
       return textResponse(content);
@@ -318,8 +343,8 @@ export async function POST(req) {
         const platformList = platforms.join(", ");
         return textResponse(
           `✅ Agent created for **${parsedData.parsed_role}** on **${platformList}**.\n\n` +
-          `Say **"show jobs"** to fetch and see matching positions!\n\n` +
-          `<!--CONFIG_ID:${configData.id}-->`,
+            `Say **"show jobs"** to fetch and see matching positions!\n\n` +
+            `<!--CONFIG_ID:${configData.id}-->`,
         );
       } else {
         return textResponse(

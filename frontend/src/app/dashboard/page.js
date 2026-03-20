@@ -36,6 +36,16 @@ export default function DashboardPage() {
   // Track whether we've auto-titled the active thread
   const titledThreadsRef = useRef(new Set());
 
+  // Handle selecting a thread from sidebar
+  const handleSelectThread = useCallback(
+    (threadId) => {
+      selectThread(threadId);
+      // Load history when user selects an existing thread
+      loadHistory(threadId);
+    },
+    [selectThread, loadHistory],
+  );
+
   // Handle creating a new thread (draft only)
   const handleNewThread = useCallback(() => {
     createDraftThread();
@@ -71,7 +81,14 @@ export default function DashboardPage() {
         updateThreadTitle(tid, title);
       }
     },
-    [activeThreadId, createDraftThread, isDraftThread, persistThread, sendMessage, updateThreadTitle]
+    [
+      activeThreadId,
+      createDraftThread,
+      isDraftThread,
+      persistThread,
+      sendMessage,
+      updateThreadTitle,
+    ],
   );
 
   // Handle suggestion click from welcome screen
@@ -83,7 +100,7 @@ export default function DashboardPage() {
         handleSendMessage(prompt);
       }, 50);
     },
-    [setInput, handleSendMessage]
+    [setInput, handleSendMessage],
   );
 
   return (
@@ -99,7 +116,8 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             {user && (
               <span className="text-xs text-muted-foreground hidden sm:block">
-                {user.firstName || user.emailAddresses?.[0]?.emailAddress?.split("@")[0]}
+                {user.firstName ||
+                  user.emailAddresses?.[0]?.emailAddress?.split("@")[0]}
               </span>
             )}
             <UserButton
@@ -117,7 +135,7 @@ export default function DashboardPage() {
             activeThreadId={activeThreadId}
             loading={threadsLoading}
             onNewThread={handleNewThread}
-            onSelectThread={selectThread}
+            onSelectThread={handleSelectThread}
             onDeleteThread={deleteThread}
             onRenameThread={updateThreadTitle}
           />

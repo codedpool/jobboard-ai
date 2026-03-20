@@ -9,7 +9,7 @@ if not GROQ_API_KEY:
 
 client = Groq(api_key=GROQ_API_KEY)
 
-MODEL_ID = "llama-3.3-70b-versatile"  # strong for structured understanding [web:59]
+MODEL_ID = "llama-3.3-70b-versatile"  # strong for structured understanding - keep for chat & parsing
 
 
 SYSTEM_PROMPT = """

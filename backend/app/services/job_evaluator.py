@@ -1,13 +1,20 @@
 import os
+import logging
 from typing import Any, Dict
 
 from groq import Groq  # already installed for parse-query
 from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
 
-GROQ_MODEL = os.getenv("GROQ_EVAL_MODEL", "llama-3.3-70b-versatile")
+logger = logging.getLogger(__name__)
 
-_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+GROQ_MODEL = os.getenv("GROQ_EVAL_MODEL", "llama-3.3-70b-versatile")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
+if not GROQ_API_KEY:
+    logger.warning("GROQ_API_KEY environment variable is not set")
+
+_client = Groq(api_key=GROQ_API_KEY)
 
 
 def build_job_prompt(config: JobConfig, job: JobResult) -> str:
@@ -42,26 +49,33 @@ Guidelines:
 
 
 def evaluate_job(config: JobConfig, job: JobResult) -> Dict[str, Any]:
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY environment variable is not set")
+
     prompt = build_job_prompt(config, job)
 
-    completion = _client.chat.completions.create(
-        model=GROQ_MODEL,
-        response_format={"type": "json_object"},  # JSON mode [web:154][web:165]
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a strict job matching evaluator. "
-                    "Always respond with a JSON object containing: "
-                    '{"score": int, "reason": string, "matches": {"skills_match": int, '
-                    '"seniority_match": int, "location_match": int}}.'
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-        max_tokens=256,
-    )
+    try:
+        completion = _client.chat.completions.create(
+            model=GROQ_MODEL,
+            response_format={"type": "json_object"},  # JSON mode [web:154][web:165]
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a strict job matching evaluator. "
+                        "Always respond with a JSON object containing: "
+                        '{"score": int, "reason": string, "matches": {"skills_match": int, '
+                        '"seniority_match": int, "location_match": int}}.'
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_tokens=256,
+        )
+    except Exception as e:
+        logger.error(f"Groq API error for job {job.id}: {str(e)}")
+        raise
 
     raw = completion.choices[0].message.content
     # Groq JSON mode guarantees valid JSON structure when used correctly. [web:154][web:165]

@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi_clerk_auth import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,7 @@ from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
 from app.services.job_evaluator import evaluate_job
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/configs", tags=["evaluation"])
 
 
@@ -51,8 +53,8 @@ async def evaluate_jobs_for_config(
             job.reason = result["reason"]
             evaluated += 1
             updated_job_ids.append(str(job.id))
-        except Exception:
-            # For now, skip on errors and continue
+        except Exception as e:
+            logger.error(f"Failed to evaluate job {job.id}: {str(e)}", exc_info=True)
             errors += 1
 
     await db.commit()

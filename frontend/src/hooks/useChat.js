@@ -50,14 +50,18 @@ export function useChat({ threadId }) {
     }
   }, []);
 
-  // Load history when threadId changes (skip for draft threads)
+  // Load history when threadId changes, but only if switching between real threads
+  // Don't load automatically when threadId changes due to draft persistence
   useEffect(() => {
-    if (threadId && !threadId.startsWith("draft-")) {
-      loadHistory(threadId);
-    } else {
+    if (!threadId) {
+      setMessages([]);
+    } else if (threadId.startsWith("draft-")) {
       setMessages([]);
     }
-  }, [threadId, loadHistory]);
+    // We deliberately don't call loadHistory here to avoid overwriting optimistically
+    // added messages when a draft thread is persisted. See handleSelectThread in
+    // DashboardPage which calls loadHistory explicitly.
+  }, [threadId]);
 
   /**
    * Save a single message to the backend.
@@ -86,7 +90,8 @@ export function useChat({ threadId }) {
   const sendMessage = useCallback(
     async (text, overrideThreadId) => {
       const tid = overrideThreadId || threadIdRef.current;
-      if (!tid || tid.startsWith("draft-") || !text?.trim() || streaming) return;
+      if (!tid || tid.startsWith("draft-") || !text?.trim() || streaming)
+        return;
 
       setError(null);
 
@@ -191,8 +196,7 @@ export function useChat({ threadId }) {
           ) {
             updated[lastIdx] = {
               ...updated[lastIdx],
-              content:
-                "⚠️ Sorry, something went wrong. Please try again.",
+              content: "⚠️ Sorry, something went wrong. Please try again.",
             };
           }
           return updated;
@@ -202,7 +206,7 @@ export function useChat({ threadId }) {
         abortRef.current = null;
       }
     },
-    [messages, streaming, persistMessage, loadHistory]
+    [messages, streaming, persistMessage, loadHistory],
   );
 
   /**
