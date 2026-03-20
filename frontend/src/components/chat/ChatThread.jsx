@@ -17,6 +17,7 @@ export const ChatThread = memo(
     streaming,
     onStop,
     onSuggestionClick,
+    onPlatformSelect,
   }) => {
     const viewportRef = useRef(null);
     const shouldAutoScrollRef = useRef(true);
@@ -70,7 +71,7 @@ export const ChatThread = memo(
       (prompt) => {
         onSuggestionClick?.(prompt);
       },
-      [onSuggestionClick]
+      [onSuggestionClick],
     );
 
     // Handle form submit
@@ -81,7 +82,7 @@ export const ChatThread = memo(
           onSendMessage(input);
         }
       },
-      [input, streaming, onSendMessage]
+      [input, streaming, onSendMessage],
     );
 
     // Handle input change (synthetic event or direct value)
@@ -89,7 +90,17 @@ export const ChatThread = memo(
       (e) => {
         setInput(e.target ? e.target.value : e);
       },
-      [setInput]
+      [setInput],
+    );
+
+    // Handle platform selection from dialog
+    const handlePlatformSelect = useCallback(
+      (platforms, parsedData) => {
+        if (onPlatformSelect) {
+          onPlatformSelect(platforms, parsedData);
+        }
+      },
+      [onPlatformSelect],
     );
 
     const isEmpty = messages.length === 0;
@@ -128,6 +139,7 @@ export const ChatThread = memo(
                   message={message}
                   isLast={index === messages.length - 1}
                   isStreaming={streaming}
+                  onPlatformSelect={handlePlatformSelect}
                 />
               ))}
             </div>
@@ -155,7 +167,7 @@ export const ChatThread = memo(
         </div>
       </div>
     );
-  }
+  },
 );
 
 ChatThread.displayName = "ChatThread";
@@ -169,7 +181,7 @@ const ScrollToBottomButton = memo(({ onClick, visible }) => {
       onClick={onClick}
       className={cn(
         "absolute -top-12 z-10 self-center rounded-full p-4 transition-opacity dark:border-border dark:bg-background dark:hover:bg-accent",
-        visible ? "opacity-100" : "pointer-events-none opacity-0"
+        visible ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
       <ArrowDownIcon className="size-4" />

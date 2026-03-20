@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { PlatformSelector } from "./PlatformSelector";
 import JobListMessage from "@/components/JobListMessage";
 import {
   DropdownMenu,
@@ -26,6 +27,7 @@ function stripHiddenContent(content) {
   return content
     .replace(/<!--JOBS:.*?-->/gs, "")
     .replace(/<!--PARSED:.*?-->/gs, "")
+    .replace(/<!--PLATFORMS:.*?-->/gs, "")
     .trim();
 }
 
@@ -33,6 +35,32 @@ function stripHiddenContent(content) {
 function hasJobsData(content) {
   if (!content) return false;
   return /<!--JOBS:.*?-->/s.test(content);
+}
+
+// Check if asking for platform selection
+function isAskingForPlatforms(content) {
+  if (!content) return false;
+  const lower = content.toLowerCase();
+  return (
+    (lower.includes("which platform") ||
+      lower.includes("select platform") ||
+      lower.includes("choose.*platform")) &&
+    /<!--PARSED:.*?-->/s.test(content)
+  );
+}
+
+// Extract parsed data from content
+function extractParsedData(content) {
+  if (!content) return null;
+  const match = content.match(/<!--PARSED:(.*?)-->/s);
+  if (match) {
+    try {
+      return JSON.parse(match[1]);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
 }
 
 // User Message Component
@@ -56,113 +84,149 @@ UserMessage.displayName = "UserMessage";
 // Streaming indicator dots
 const StreamingDots = () => (
   <div className="flex items-center gap-1 py-1">
-    <div className="size-1.5 animate-pulse rounded-full bg-muted-foreground/50" style={{ animationDelay: "0ms" }} />
-    <div className="size-1.5 animate-pulse rounded-full bg-muted-foreground/50" style={{ animationDelay: "150ms" }} />
-    <div className="size-1.5 animate-pulse rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} />
+    <div
+      className="size-1.5 animate-pulse rounded-full bg-muted-foreground/50"
+      style={{ animationDelay: "0ms" }}
+    />
+    <div
+      className="size-1.5 animate-pulse rounded-full bg-muted-foreground/50"
+      style={{ animationDelay: "150ms" }}
+    />
+    <div
+      className="size-1.5 animate-pulse rounded-full bg-muted-foreground/50"
+      style={{ animationDelay: "300ms" }}
+    />
   </div>
 );
 
 // Assistant Message Component
-const AssistantMessage = memo(({ message, onCopy, isLast, isStreaming }) => {
-  const [isCopied, setIsCopied] = useState(false);
+const AssistantMessage = memo(
+  ({ message, onCopy, isLast, isStreaming, onPlatformSelect }) => {
+    const [isSelectingPlatforms, setIsSelectingPlatforms] = useState(false);
 
-  const content = message.content || "";
-  const showJobs = hasJobsData(content);
-  const displayContent = stripHiddenContent(content);
+    const content = message.content || "";
+    const showJobs = hasJobsData(content);
+    const askingForPlatforms = isAskingForPlatforms(content);
+    const displayContent = stripHiddenContent(content);
+    const parsedData = extractParsedData(content);
 
-  const handleCopy = useCallback(async () => {
-    if (isCopied) return;
-    try {
-      await navigator.clipboard.writeText(displayContent);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  }, [displayContent, isCopied]);
+    const handleCopy = useCallback(async () => {
+      if (isSelectingPlatforms) return;
+      try {
+        await navigator.clipboard.writeText(displayContent);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+      } catch (err) {
+        console.error("Failed to copy:", err);
+      }
+    }, [displayContent, isSelectingPlatforms]);
 
-  const isEmpty = !displayContent && !showJobs;
-  const isCurrentlyStreaming = isStreaming && isLast;
+    const handlePlatformSelect = useCallback(
+      (platforms) => {
+        setIsSelectingPlatforms(true);
+        onPlatformSelect?.(platforms, parsedData);
+      },
+      [onPlatformSelect, parsedData],
+    );
 
-  return (
-    <div
-      className="fade-in slide-in-from-bottom-1 relative mx-auto w-full max-w-3xl animate-in py-3 duration-150"
-      data-role="assistant"
-    >
-      {/* Avatar indicator */}
-      <div className="mb-1.5 ml-2 flex items-center gap-2">
-        <div className="flex size-6 items-center justify-center rounded-full bg-primary/10 border border-primary/20">
-          <BotIcon className="size-3.5 text-primary" />
+    const [isCopied, setIsCopied] = useState(false);
+    const isEmpty = !displayContent && !showJobs;
+    const isCurrentlyStreaming = isStreaming && isLast;
+
+    return (
+      <div
+        className="fade-in slide-in-from-bottom-1 relative mx-auto w-full max-w-3xl animate-in py-3 duration-150"
+        data-role="assistant"
+      >
+        {/* Avatar indicator */}
+        <div className="mb-1.5 ml-2 flex items-center gap-2">
+          <div className="flex size-6 items-center justify-center rounded-full bg-primary/10 border border-primary/20">
+            <BotIcon className="size-3.5 text-primary" />
+          </div>
+          <span className="text-xs font-medium text-muted-foreground">
+            Assistant
+          </span>
+          {isCurrentlyStreaming && (
+            <span className="text-xs text-primary/70 animate-pulse">
+              typing...
+            </span>
+          )}
         </div>
-        <span className="text-xs font-medium text-muted-foreground">Assistant</span>
-        {isCurrentlyStreaming && (
-          <span className="text-xs text-primary/70 animate-pulse">typing...</span>
-        )}
-      </div>
 
-      <div className="wrap-break-word px-2 text-foreground leading-relaxed">
-        {/* Show streaming placeholder if empty and streaming */}
-        {isEmpty && isCurrentlyStreaming ? (
-          <StreamingDots />
-        ) : (
-          <>
-            {/* Markdown content */}
-            {displayContent && <MarkdownRenderer content={displayContent} />}
+        <div className="wrap-break-word px-2 text-foreground leading-relaxed">
+          {/* Show streaming placeholder if empty and streaming */}
+          {isEmpty && isCurrentlyStreaming ? (
+            <StreamingDots />
+          ) : (
+            <>
+              {/* Markdown content */}
+              {displayContent && <MarkdownRenderer content={displayContent} />}
 
-            {/* Job tiles */}
-            {showJobs && <JobListMessage content={content} />}
-          </>
-        )}
-      </div>
+              {/* Job tiles */}
+              {showJobs && <JobListMessage content={content} />}
 
-      {/* Action Bar - Show when not streaming and has content */}
-      {!isCurrentlyStreaming && displayContent && (
-        <div className="mt-1 ml-2 flex min-h-6 items-center gap-1 text-muted-foreground">
-          <TooltipIconButton
-            tooltip={isCopied ? "Copied!" : "Copy"}
-            onClick={handleCopy}
-          >
-            {isCopied ? (
-              <CheckIcon className="size-4" />
-            ) : (
-              <CopyIcon className="size-4" />
-            )}
-          </TooltipIconButton>
+              {/* Platform Selector */}
+              {askingForPlatforms && !isSelectingPlatforms && (
+                <div className="mt-4">
+                  <PlatformSelector
+                    onSelect={handlePlatformSelect}
+                    isLoading={isSelectingPlatforms}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <TooltipIconButton
-                tooltip="More"
-                className="data-[state=open]:bg-accent"
-              >
-                <MoreHorizontalIcon className="size-4" />
-              </TooltipIconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              side="bottom"
-              align="start"
-              className="min-w-32"
+        {/* Action Bar - Show when not streaming and has content */}
+        {!isCurrentlyStreaming && displayContent && !askingForPlatforms && (
+          <div className="mt-1 ml-2 flex min-h-6 items-center gap-1 text-muted-foreground">
+            <TooltipIconButton
+              tooltip={isCopied ? "Copied!" : "Copy"}
+              onClick={handleCopy}
             >
-              <DropdownMenuItem
-                onClick={handleCopy}
-                className="flex cursor-pointer items-center gap-2"
-              >
+              {isCopied ? (
+                <CheckIcon className="size-4" />
+              ) : (
                 <CopyIcon className="size-4" />
-                Copy as text
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
-    </div>
-  );
-});
+              )}
+            </TooltipIconButton>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <TooltipIconButton
+                  tooltip="More"
+                  className="data-[state=open]:bg-accent"
+                >
+                  <MoreHorizontalIcon className="size-4" />
+                </TooltipIconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="bottom"
+                align="start"
+                className="min-w-32"
+              >
+                <DropdownMenuItem
+                  onClick={handleCopy}
+                  className="flex cursor-pointer items-center gap-2"
+                >
+                  <CopyIcon className="size-4" />
+                  Copy as text
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+      </div>
+    );
+  },
+);
 
 AssistantMessage.displayName = "AssistantMessage";
 
 // Main ChatMessage Component
 export const ChatMessage = memo(
-  ({ message, onCopy, isLast, isStreaming }) => {
+  ({ message, onCopy, isLast, isStreaming, onPlatformSelect }) => {
     if (message.role === "user") {
       return <UserMessage message={message} />;
     }
@@ -174,12 +238,13 @@ export const ChatMessage = memo(
           onCopy={onCopy}
           isLast={isLast}
           isStreaming={isStreaming}
+          onPlatformSelect={onPlatformSelect}
         />
       );
     }
 
     return null;
-  }
+  },
 );
 
 ChatMessage.displayName = "ChatMessage";

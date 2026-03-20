@@ -154,6 +154,16 @@ export async function POST(req) {
     .find((m) => m.role === "user");
   const lastText = getMessageText(lastUserMessage);
 
+  // Extract selected platforms from the user message if available
+  const platformsMatch = lastText.match(/<!--PLATFORMS:(.*?)-->/s);
+  let selectedPlatforms = [];
+  if (platformsMatch) {
+    try {
+      const platformData = JSON.parse(platformsMatch[1]);
+      selectedPlatforms = platformData.platforms || [];
+    } catch (_) {}
+  }
+
   // Grab an auth token to forward to the Python backend when needed
   const authState = getAuth(req);
   const clerkToken =
@@ -213,9 +223,15 @@ export async function POST(req) {
         configId = configs[0].id;
       }
 
+      // Build query string for platforms if selected
+      const platformsQuery =
+        selectedPlatforms.length > 0
+          ? `?platforms=${encodeURIComponent(selectedPlatforms.join(","))}`
+          : "";
+
       // Step 1: Fetch fresh jobs from platforms
       const fetchRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/fetch`,
+        `${BACKEND_URL}/api/configs/${configId}/fetch${platformsQuery}`,
         {
           method: "POST",
           headers: authHeaders,
@@ -230,7 +246,7 @@ export async function POST(req) {
       // Step 2: Evaluate the jobs (use total_inserted to ensure all are evaluated)
       const evalLimit = Math.max(20, fetchData.total_inserted || 0);
       const evalRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=${evalLimit}`,
+        `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=${evalLimit}${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
         {
           method: "POST",
           headers: authHeaders,
@@ -244,7 +260,7 @@ export async function POST(req) {
 
       // Step 3: Get the results (sorted by score)
       const resultsRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/results?limit=50`,
+        `${BACKEND_URL}/api/configs/${configId}/results?limit=50${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
         {
           headers: authHeaders,
         },
@@ -302,7 +318,11 @@ export async function POST(req) {
     isPlatformListMessage(lastText) &&
     lastAssistantAskedForPlatforms(messages)
   ) {
-    const platforms = extractPlatforms(lastText);
+    // Extract platforms either from typed text or from dialog selection
+    let platforms =
+      selectedPlatforms.length > 0
+        ? selectedPlatforms
+        : extractPlatforms(lastText);
 
     const assistantMsgs = messages.filter((m) => m.role === "assistant");
     const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
@@ -386,9 +406,7 @@ export async function POST(req) {
       `**Seniority:** ${parsed.seniority}\n` +
       `**Location:** ${parsed.location_preference}\n` +
       `**Summary:** ${parsed.summary}\n\n` +
-      `Which platforms should I search on? You can pick one or more:\n` +
-      `- remoteok\n- remotive\n- github\n- hn (Hacker News)\n- yc (Y Combinator)\n- reddit\n- linkedin\n\n` +
-      `Just reply with the platform names, e.g. \`remoteok, remotive, github\`\n` +
+      `Now, select which platforms you'd like me to search on 👇\n` +
       `<!--PARSED:${JSON.stringify({ ...parsed, raw_query: lastText })}-->`;
 
     return textResponse(responseText);

@@ -4,3 +4,4 @@ export { ChatComposer } from "./ChatComposer";
 export { ChatSidebar } from "./ChatSidebar";
 export { ChatWelcome } from "./ChatWelcome";
 export { MarkdownRenderer } from "./MarkdownRenderer";
+export { PlatformSelector } from "./PlatformSelector";

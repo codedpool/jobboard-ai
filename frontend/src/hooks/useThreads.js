@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useAuth } from "@clerk/nextjs";
 
 /**
  * Hook to manage thread list backed by Postgres via FastAPI.
  * Supports "draft" threads that are not persisted until the first message.
  */
 export function useThreads() {
+  const { getToken } = useAuth();
   const [threads, setThreads] = useState([]);
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +28,7 @@ export function useThreads() {
       }
       const data = await res.json();
       const sorted = (Array.isArray(data) ? data : []).sort(
-        (a, b) => new Date(b.updated_at) - new Date(a.updated_at)
+        (a, b) => new Date(b.updated_at) - new Date(a.updated_at),
       );
       setThreads(sorted);
       return sorted;
@@ -70,36 +72,43 @@ export function useThreads() {
    * Persist a draft thread to the backend (called when first message is sent).
    * Returns the real thread from the backend.
    */
-  const persistThread = useCallback(async (draftId, title) => {
-    if (!draftThreadIds.current.has(draftId)) {
-      // Not a draft, nothing to persist
-      return null;
-    }
-
-    try {
-      const res = await fetch("/api/threads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title || null }),
-      });
-      if (!res.ok) {
-        console.error("Failed to create thread:", res.status);
+  const persistThread = useCallback(
+    async (draftId, title) => {
+      if (!draftThreadIds.current.has(draftId)) {
+        // Not a draft, nothing to persist
         return null;
       }
-      const newThread = await res.json();
 
-      // Remove draft marker and replace draft with real thread
-      draftThreadIds.current.delete(draftId);
-      setThreads((prev) =>
-        prev.map((t) => (t.id === draftId ? newThread : t))
-      );
-      setActiveThreadId(newThread.id);
-      return newThread;
-    } catch (err) {
-      console.error("Error persisting thread:", err);
-      return null;
-    }
-  }, []);
+      try {
+        const token = await getToken();
+        const res = await fetch("/api/threads", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
+          body: JSON.stringify({ title: title || null }),
+        });
+        if (!res.ok) {
+          console.error("Failed to create thread:", res.status);
+          return null;
+        }
+        const newThread = await res.json();
+
+        // Remove draft marker and replace draft with real thread
+        draftThreadIds.current.delete(draftId);
+        setThreads((prev) =>
+          prev.map((t) => (t.id === draftId ? newThread : t)),
+        );
+        setActiveThreadId(newThread.id);
+        return newThread;
+      } catch (err) {
+        console.error("Error persisting thread:", err);
+        return null;
+      }
+    },
+    [getToken],
+  );
 
   /**
    * Check if a thread ID is a draft.
@@ -120,7 +129,7 @@ export function useThreads() {
    */
   const updateThreadTitle = useCallback((threadId, title) => {
     setThreads((prev) =>
-      prev.map((t) => (t.id === threadId ? { ...t, title } : t))
+      prev.map((t) => (t.id === threadId ? { ...t, title } : t)),
     );
   }, []);
 
@@ -141,9 +150,13 @@ export function useThreads() {
 
       // Otherwise, delete from backend
       try {
+        const token = await getToken();
         const res = await fetch("/api/threads", {
           method: "DELETE",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
           body: JSON.stringify({ threadId }),
         });
         if (!res.ok && res.status !== 204) {
@@ -158,7 +171,7 @@ export function useThreads() {
         console.error("Error deleting thread:", err);
       }
     },
-    [activeThreadId]
+    [activeThreadId, getToken],
   );
 
   /**

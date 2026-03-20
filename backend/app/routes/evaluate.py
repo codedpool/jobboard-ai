@@ -1,5 +1,6 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_clerk_auth import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api/configs", tags=["evaluation"])
 async def evaluate_jobs_for_config(
     config_id: str,
     limit: int = 20,
+    platforms: Optional[str] = Query(None),
     credentials: HTTPAuthorizationCredentials = Depends(get_clerk_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -32,14 +34,28 @@ async def evaluate_jobs_for_config(
     if not config:
         raise HTTPException(status_code=404, detail="Config not found")
 
+    # Determine which platforms to evaluate for
+    selected_platforms = []
+    if platforms:
+        # Parse comma-separated platforms from query parameter
+        selected_platforms = [p.strip().lower() for p in platforms.split(",")]
+    elif config.platforms:
+        # Use platforms from config if available
+        selected_platforms = [p.lower() for p in config.platforms]
+
     # Select unevaluated jobs for this config
-    jobs_stmt = (
+    jobs_query = (
         select(JobResult)
         .where(JobResult.config_id == config.id, JobResult.score.is_(None))
         .order_by(JobResult.created_at.desc().nullslast())
-        .limit(limit)
     )
-    jobs_result = await db.execute(jobs_stmt)
+
+    # Filter by platforms if specified
+    if selected_platforms:
+        jobs_query = jobs_query.where(JobResult.source.in_(selected_platforms))
+
+    jobs_query = jobs_query.limit(limit)
+    jobs_result = await db.execute(jobs_query)
     jobs = list(jobs_result.scalars().all())
 
     evaluated = 0

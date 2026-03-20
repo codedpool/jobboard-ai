@@ -219,6 +219,24 @@ export function useChat({ threadId }) {
     }
   }, []);
 
+  /**
+   * Handle platform selection from the dialog.
+   */
+  const selectPlatforms = useCallback(
+    async (platforms, parsedData) => {
+      const tid = threadIdRef.current;
+      if (!tid || !platforms || platforms.length === 0) return;
+
+      // Construct the message as if user selected these platforms
+      const platformList = platforms.join(", ");
+      const userMessage = `${platformList}\n<!--PLATFORMS:${JSON.stringify({ platforms })}-->`;
+
+      // Send the message with the correct flow
+      await sendMessage(userMessage);
+    },
+    [sendMessage],
+  );
+
   return {
     messages,
     input,
@@ -228,5 +246,6 @@ export function useChat({ threadId }) {
     stop,
     error,
     loadHistory,
+    selectPlatforms,
   };
 }

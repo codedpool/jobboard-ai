@@ -31,6 +31,7 @@ export default function DashboardPage() {
     stop,
     error,
     loadHistory,
+    selectPlatforms,
   } = useChat({ threadId: activeThreadId });
 
   // Track whether we've auto-titled the active thread
@@ -152,6 +153,7 @@ export default function DashboardPage() {
           streaming={streaming}
           onStop={stop}
           onSuggestionClick={handleSuggestionClick}
+          onPlatformSelect={selectPlatforms}
         />
       </main>
     </div>
