@@ -1,150 +1,122 @@
 "use client";
 
 import { SignUp } from "@clerk/nextjs";
-import { Briefcase, Zap, Target, Shield } from "lucide-react";
+import { Shield, Target, Zap } from "lucide-react";
+import { Logo } from "@/components/Logo";
 
 export default function SignUpPage() {
   return (
-    <div className="relative flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950">
-      {/* Left side - Sign up form */}
-      <div className="flex-1 flex items-center justify-center p-8 relative order-2 lg:order-1">
-        {/* Mobile background */}
-        <div className="absolute inset-0 lg:hidden mesh-gradient opacity-30" />
-        <div className="absolute inset-0 lg:hidden noise-texture" />
-        
-        <div className="w-full max-w-md relative z-10">
-          {/* Mobile logo */}
-          <div className="lg:hidden mb-8 text-center">
-            <div className="inline-flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg">
-                <Briefcase className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-2xl font-bold">JobBoard AI</span>
-            </div>
+    <div className="relative flex min-h-screen overflow-hidden bg-[#fafaf7] text-slate-900 dark:bg-[#0a0a0f] dark:text-slate-100">
+      <div className="aurora" aria-hidden />
+      <div className="absolute inset-0 grid-fade" aria-hidden />
+
+      {/* Form (left on mobile, right on desktop is more common; we mirror sign-in by putting it on the left) */}
+      <main className="relative z-10 flex flex-1 items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-md">
+          <div className="mb-6 flex justify-center lg:hidden">
+            <Logo variant="icon" height={64} priority />
           </div>
 
-          <div className="premium-glass rounded-3xl p-8 shadow-2xl">
+          <div className="rounded-3xl border border-slate-200/80 bg-white/80 p-7 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/60">
             <div className="mb-6">
-              <h2 className="text-2xl font-bold mb-2">Create your account</h2>
-              <p className="text-slate-600 dark:text-slate-400">
-                Start your journey to finding the perfect job
+              <h2 className="text-2xl font-semibold tracking-[-0.02em]">
+                Create your account
+              </h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                Two minutes to set up, then the assistant starts looking.
               </p>
             </div>
-            
+
             <SignUp
               appearance={{
-                layout: {
-                  logoPlacement: "none",
-                },
+                layout: { logoPlacement: "none" },
                 elements: {
                   rootBox: "w-full",
-                  card: "bg-transparent shadow-none",
+                  card: "bg-transparent shadow-none border-0 p-0",
                   headerTitle: "hidden",
                   headerSubtitle: "hidden",
-                  socialButtonsBlockButton: "bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 shadow-sm transition-all",
-                  formButtonPrimary: "bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 shadow-md hover:shadow-lg transition-all",
-                  footerActionLink: "text-blue-600 hover:text-blue-700 font-medium",
-                  formFieldInput: "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700",
-                  identityPreviewEditButton: "text-blue-600 hover:text-blue-700",
+                  socialButtonsBlockButton:
+                    "bg-white dark:bg-slate-900/60 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 shadow-none rounded-xl",
+                  formButtonPrimary:
+                    "bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 rounded-xl shadow-none",
+                  footerActionLink:
+                    "text-slate-900 dark:text-slate-100 font-medium underline-offset-4 hover:underline",
+                  formFieldInput:
+                    "bg-white dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 rounded-xl",
+                  identityPreviewEditButton:
+                    "text-slate-900 dark:text-slate-100",
                 },
               }}
             />
           </div>
 
-          <p className="text-center text-sm text-slate-600 dark:text-slate-400 mt-6">
+          <p className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400">
             Already have an account?{" "}
-            <a href="/sign-in" className="text-blue-600 hover:text-blue-700 font-medium">
+            <a
+              href="/sign-in"
+              className="font-medium text-slate-900 underline-offset-4 hover:underline dark:text-slate-100"
+            >
               Sign in
             </a>
           </p>
         </div>
-      </div>
+      </main>
 
-      {/* Right side - Branding & Info */}
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden order-1 lg:order-2">
-        {/* Premium mesh gradient background */}
-        <div className="absolute inset-0 mesh-gradient" />
-        <div className="absolute inset-0 noise-texture" />
-        
-        {/* Floating orbs */}
-        <div className="absolute top-32 right-20 w-64 h-64 bg-pink-500/20 rounded-full blur-3xl animate-float" />
-        <div className="absolute bottom-20 left-20 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-float-delayed" />
-        <div className="absolute top-1/2 right-1/3 w-72 h-72 bg-purple-500/15 rounded-full blur-3xl animate-float-slow" />
-        
-        {/* Content */}
-        <div className="relative z-10 flex flex-col justify-between p-12 text-slate-900 dark:text-white">
-          {/* Logo/Brand */}
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg">
-                <Briefcase className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-2xl font-bold">JobBoard AI</span>
-            </div>
-            <p className="text-slate-600 dark:text-slate-400 text-sm ml-13">
-              Your intelligent job search companion
-            </p>
-          </div>
+      {/* Right rail — brand & editorial tagline */}
+      <aside className="relative z-10 hidden flex-col justify-between p-12 lg:flex lg:w-1/2">
+        <div className="flex justify-end">
+          <Logo variant="icon" height={44} priority />
+        </div>
 
-          {/* Main content */}
-          <div className="space-y-8 max-w-md">
-            <div>
-              <h1 className="text-4xl font-bold mb-4 leading-tight">
-                Start your journey to
-                <span className="block mt-1 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-                  career success
-                </span>
-              </h1>
-              <p className="text-lg text-slate-600 dark:text-slate-400">
-                Join thousands of professionals who found their dream jobs with AI-powered assistance.
-              </p>
-            </div>
+        <div className="max-w-md">
+          <h1 className="text-4xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-5xl">
+            The next role,{" "}
+            <span className="font-serif-display italic font-normal text-slate-400 dark:text-slate-500">
+              quietly found.
+            </span>
+          </h1>
+          <p className="mt-5 text-[15px] leading-relaxed text-slate-600 dark:text-slate-400">
+            One conversation. Every major board. A thoughtful assistant that
+            reads between the lines and surfaces only the openings worth your
+            morning coffee.
+          </p>
 
-            {/* Feature highlights */}
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm flex items-center justify-center shadow-sm">
-                  <Zap className="w-5 h-5 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold mb-1">Lightning Fast Setup</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Get started in under 2 minutes and begin your job search immediately
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm flex items-center justify-center shadow-sm">
-                  <Target className="w-5 h-5 text-purple-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold mb-1">Personalized Experience</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    AI learns your preferences and finds jobs that truly match your goals
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm flex items-center justify-center shadow-sm">
-                  <Shield className="w-5 h-5 text-pink-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold mb-1">Secure & Private</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Your data is encrypted and protected with enterprise-grade security
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="text-sm text-slate-500 dark:text-slate-500">
-            © 2024 JobBoard AI. Empowering careers with intelligence.
+          <div className="mt-10 space-y-5">
+            <RailItem
+              Icon={Zap}
+              title="Two-minute setup"
+              body="Ask in plain English — no forms, no dropdowns, no checkboxes to tick."
+            />
+            <RailItem
+              Icon={Target}
+              title="Tailored from day one"
+              body="Match scores learn from what you ignore just as much as what you open."
+            />
+            <RailItem
+              Icon={Shield}
+              title="Private by default"
+              body="No crawler on your resume. No shared profile. Your searches stay yours."
+            />
           </div>
         </div>
+
+        <p className="text-right text-xs text-slate-400 dark:text-slate-500">
+          © {new Date().getFullYear()} JobBoard AI — quiet tools for a loud market.
+        </p>
+      </aside>
+    </div>
+  );
+}
+
+function RailItem({ Icon, title, body }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/70 text-slate-700 shadow-sm ring-1 ring-slate-200/70 dark:bg-slate-900/60 dark:text-slate-200 dark:ring-slate-800/70">
+        <Icon className="h-4 w-4" strokeWidth={1.75} />
+      </span>
+      <div>
+        <h3 className="text-sm font-semibold">{title}</h3>
+        <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">{body}</p>
       </div>
     </div>
   );

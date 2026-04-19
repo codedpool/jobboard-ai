@@ -18,14 +18,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// Strip hidden comments from content for display
+// Strip hidden metadata comments (<!--KEY:…-->) from content for display.
+// Matches any uppercase-keyed marker — JOBS, PARSED, PLATFORMS, CONFIG_ID, etc.
+const HIDDEN_MARKER_RE = /<!--[A-Z_][A-Z0-9_]*:[\s\S]*?-->/g;
+
 function stripHiddenContent(content) {
   if (!content) return "";
-  return content
-    .replace(/<!--JOBS:.*?-->/gs, "")
-    .replace(/<!--PARSED:.*?-->/gs, "")
-    .replace(/<!--PLATFORMS:.*?-->/gs, "")
-    .trim();
+  return content.replace(HIDDEN_MARKER_RE, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 // Check if content has jobs data
@@ -62,6 +61,8 @@ function extractParsedData(content) {
 
 // User Message Component
 const UserMessage = memo(({ message }) => {
+  const visible = stripHiddenContent(message.content);
+  if (!visible) return null;
   return (
     <div
       className="group fade-in slide-in-from-bottom-1 mx-auto grid w-full max-w-3xl animate-in auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 py-3 duration-150"
@@ -69,7 +70,7 @@ const UserMessage = memo(({ message }) => {
     >
       <div className="relative col-start-2 min-w-0">
         <div className="wrap-break-word rounded-2xl rounded-br-md bg-slate-900/[0.06] border border-slate-900/[0.04] px-4 py-2.5 text-[15px] leading-relaxed text-slate-900 dark:bg-white/[0.08] dark:border-white/[0.06] dark:text-slate-100">
-          {message.content}
+          {visible}
         </div>
       </div>
     </div>

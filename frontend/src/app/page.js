@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { ArrowUpRight, Sparkles, MapPin, Building2, Clock } from "lucide-react";
+import { Logo } from "@/components/Logo";
 
 export default function HomePage() {
   const { isSignedIn } = useUser();
@@ -180,22 +181,7 @@ function Nav({ isSignedIn }) {
 }
 
 function Wordmark({ small = false }) {
-  return (
-    <Link href="/" className="flex items-center gap-2.5">
-      <span className="relative flex h-7 w-7 items-center justify-center rounded-[10px] bg-gradient-to-br from-slate-900 to-slate-700 dark:from-white dark:to-slate-300">
-        <Sparkles className="h-3.5 w-3.5 text-white dark:text-slate-900" strokeWidth={2.5} />
-      </span>
-      <span
-        className={
-          small
-            ? "text-sm font-semibold tracking-tight"
-            : "text-base font-semibold tracking-tight"
-        }
-      >
-        Jobboard<span className="text-slate-400 dark:text-slate-500">·</span>AI
-      </span>
-    </Link>
-  );
+  return <Logo variant="icon" height={small ? 24 : 34} priority={!small} />;
 }
 
 function Dot() {

@@ -12,8 +12,13 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata = {
-  title: "Job Board AI Aggregator",
+  title: "JobBoard AI",
   description: "AI-powered job board aggregator",
+  icons: {
+    icon: [{ url: "/icon.png", type: "image/png" }],
+    shortcut: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({ children }) {

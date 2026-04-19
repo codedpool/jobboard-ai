@@ -14,9 +14,9 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
-  Sparkles,
   Timer,
 } from "lucide-react";
+import { Logo } from "@/components/Logo";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -156,10 +156,8 @@ export default function AdminPage() {
     return (
       <Shell>
         <div className="mx-auto flex h-[70vh] max-w-lg flex-col items-center justify-center text-center">
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900">
-            <Ban className="h-6 w-6" />
-          </span>
-          <h1 className="mt-6 text-3xl font-semibold tracking-[-0.02em]">
+          <Logo variant="icon" height={80} href={null} />
+          <h1 className="mt-8 text-3xl font-semibold tracking-[-0.02em]">
             Not for you{" "}
             <span className="font-serif-display italic font-normal text-slate-400 dark:text-slate-500">
               — yet.
@@ -378,17 +376,12 @@ function Shell({ children }) {
 
       <nav className="relative z-10 border-b border-slate-200/70 dark:border-slate-800/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-          <Link href="/dashboard" className="group flex items-center gap-2.5">
-            <span className="flex h-7 w-7 items-center justify-center rounded-[10px] bg-gradient-to-br from-slate-900 to-slate-700 dark:from-white dark:to-slate-300">
-              <Sparkles className="h-3.5 w-3.5 text-white dark:text-slate-900" strokeWidth={2.5} />
+          <div className="flex items-center gap-3">
+            <Logo variant="icon" height={30} href="/dashboard" />
+            <span className="font-serif-display text-sm italic font-normal text-slate-400 dark:text-slate-500">
+              / admin
             </span>
-            <span className="text-sm font-semibold tracking-tight">
-              Jobboard<span className="text-slate-400 dark:text-slate-500">·</span>AI
-              <span className="ml-2 font-serif-display text-sm italic font-normal text-slate-400 dark:text-slate-500">
-                / admin
-              </span>
-            </span>
-          </Link>
+          </div>
           <div className="flex items-center gap-4">
             <Link
               href="/dashboard"

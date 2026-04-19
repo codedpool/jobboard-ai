@@ -3,8 +3,8 @@
 import { useCallback, useRef } from "react";
 import { UserButton, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 import { ChatThread, ChatSidebar } from "@/components/chat";
+import { Logo } from "@/components/Logo";
 import { useChat } from "@/hooks/useChat";
 import { useThreads } from "@/hooks/useThreads";
 
@@ -103,18 +103,7 @@ export default function DashboardPage() {
     <div className="flex h-screen bg-[#fafaf7] dark:bg-[#0a0a0f] text-slate-900 dark:text-slate-100">
       <aside className="hidden w-72 shrink-0 flex-col border-r border-slate-200/70 bg-[#f5f4ef]/60 dark:border-slate-800/70 dark:bg-[#0b0b11]/70 md:flex">
         <div className="flex items-center justify-between px-5 pt-5 pb-4">
-          <Link href="/dashboard" className="group flex items-center gap-2.5">
-            <span className="flex h-7 w-7 items-center justify-center rounded-[10px] bg-gradient-to-br from-slate-900 to-slate-700 dark:from-white dark:to-slate-300">
-              <Sparkles
-                className="h-3.5 w-3.5 text-white dark:text-slate-900"
-                strokeWidth={2.5}
-              />
-            </span>
-            <span className="text-sm font-semibold tracking-tight">
-              Jobboard
-              <span className="text-slate-400 dark:text-slate-500">·</span>AI
-            </span>
-          </Link>
+          <Logo variant="icon" height={30} href="/dashboard" />
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 pb-3">
