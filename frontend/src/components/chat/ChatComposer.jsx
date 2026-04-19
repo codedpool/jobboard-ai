@@ -1,118 +1,105 @@
 "use client";
 
 import { memo, useRef, useEffect } from "react";
-import { ArrowUpIcon, SquareIcon, PlusIcon } from "lucide-react";
+import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { TooltipIconButton } from "@/components/tooltip-icon-button";
 
-export const ChatComposer = memo(({
-  input,
-  onInputChange,
-  onSubmit,
-  isLoading,
-  onStop,
-  placeholder = "Send a message...",
-  disabled = false,
-}) => {
-  const textareaRef = useRef(null);
+export const ChatComposer = memo(
+  ({
+    input,
+    onInputChange,
+    onSubmit,
+    isLoading,
+    onStop,
+    placeholder = "Ask about a role, stack, or location…",
+    disabled = false,
+  }) => {
+    const textareaRef = useRef(null);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = "auto";
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
-    }
-  }, [input]);
+    useEffect(() => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        textarea.style.height = "auto";
+        textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+      }
+    }, [input]);
 
-  // Auto-focus on mount
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+    useEffect(() => {
+      textareaRef.current?.focus();
+    }, []);
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    const handleKeyDown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (input.trim() && !isLoading && !disabled) {
+          onSubmit(e);
+        }
+      }
+    };
+
+    const handleSubmit = (e) => {
       e.preventDefault();
       if (input.trim() && !isLoading && !disabled) {
         onSubmit(e);
       }
-    }
-  };
+    };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (input.trim() && !isLoading && !disabled) {
-      onSubmit(e);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="relative flex w-full flex-col">
-      <div
-        className={cn(
-          "flex w-full flex-col gap-2 rounded-3xl border bg-background p-2.5 transition-shadow",
-          "focus-within:border-ring/75 focus-within:ring-2 focus-within:ring-ring/20",
-          disabled && "opacity-50"
-        )}
-      >
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={onInputChange}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          disabled={disabled}
-          rows={1}
+    return (
+      <form onSubmit={handleSubmit} className="relative w-full">
+        <div
           className={cn(
-            "max-h-32 min-h-10 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none",
-            "placeholder:text-muted-foreground/80"
+            "group relative flex items-end gap-2 rounded-3xl border border-slate-200/80 bg-white/80 px-4 py-3 shadow-[0_8px_30px_-12px_rgba(15,23,42,0.15)] backdrop-blur-xl transition",
+            "focus-within:border-slate-300 focus-within:shadow-[0_12px_40px_-12px_rgba(15,23,42,0.25)]",
+            "dark:border-slate-800/80 dark:bg-slate-900/70 dark:focus-within:border-slate-700",
+            disabled && "opacity-50",
           )}
-          aria-label="Message input"
-        />
-        
-        <div className="relative flex items-center justify-between">
-          {/* Attachment button placeholder */}
-          <TooltipIconButton
-            tooltip="Add attachment"
-            variant="ghost"
-            size="icon"
-            type="button"
-            className="size-8 rounded-full p-1 hover:bg-muted-foreground/15"
-            disabled
-          >
-            <PlusIcon className="size-5 stroke-[1.5px]" />
-          </TooltipIconButton>
+        >
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={onInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={disabled}
+            rows={1}
+            className={cn(
+              "max-h-40 min-h-[28px] w-full resize-none bg-transparent py-1 pr-1 text-[15px] leading-6 outline-none",
+              "placeholder:text-slate-400 dark:placeholder:text-slate-500",
+            )}
+            aria-label="Message input"
+          />
 
-          {/* Send / Stop button */}
           {!isLoading ? (
-            <TooltipIconButton
-              tooltip="Send message"
+            <Button
               type="submit"
-              variant="default"
               size="icon"
-              className="size-8 rounded-full"
+              className="h-9 w-9 shrink-0 rounded-full bg-slate-900 text-white transition hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
               disabled={!input.trim() || disabled}
               aria-label="Send message"
             >
-              <ArrowUpIcon className="size-4" />
-            </TooltipIconButton>
+              <ArrowUpIcon className="h-4 w-4" strokeWidth={2.25} />
+            </Button>
           ) : (
             <Button
               type="button"
-              variant="default"
               size="icon"
-              className="size-8 rounded-full"
+              className="h-9 w-9 shrink-0 rounded-full bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
               onClick={onStop}
               aria-label="Stop generating"
             >
-              <SquareIcon className="size-3 fill-current" />
+              <SquareIcon className="h-3 w-3 fill-current" />
             </Button>
           )}
         </div>
-      </div>
-    </form>
-  );
-});
+
+        <p className="mt-2 text-center text-[11px] text-slate-400 dark:text-slate-500">
+          Press <kbd className="rounded border border-slate-200 bg-white px-1 font-mono text-[10px] dark:border-slate-800 dark:bg-slate-900">Enter</kbd> to send ·{" "}
+          <kbd className="rounded border border-slate-200 bg-white px-1 font-mono text-[10px] dark:border-slate-800 dark:bg-slate-900">Shift+Enter</kbd> for newline
+        </p>
+      </form>
+    );
+  },
+);
 
 ChatComposer.displayName = "ChatComposer";

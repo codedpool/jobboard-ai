@@ -3,6 +3,7 @@
 import { useCallback, useRef } from "react";
 import { UserButton, useUser } from "@clerk/nextjs";
 import Link from "next/link";
+import { Sparkles } from "lucide-react";
 import { ChatThread, ChatSidebar } from "@/components/chat";
 import { useChat } from "@/hooks/useChat";
 import { useThreads } from "@/hooks/useThreads";
@@ -34,36 +35,29 @@ export default function DashboardPage() {
     selectPlatforms,
   } = useChat({ threadId: activeThreadId });
 
-  // Track whether we've auto-titled the active thread
   const titledThreadsRef = useRef(new Set());
 
-  // Handle selecting a thread from sidebar
   const handleSelectThread = useCallback(
     (threadId) => {
       selectThread(threadId);
-      // Load history when user selects an existing thread
       loadHistory(threadId);
     },
     [selectThread, loadHistory],
   );
 
-  // Handle creating a new thread (draft only)
   const handleNewThread = useCallback(() => {
     createDraftThread();
   }, [createDraftThread]);
 
-  // Handle sending a message
   const handleSendMessage = useCallback(
     async (text) => {
       let tid = activeThreadId;
 
-      // Auto-create draft thread if none selected
       if (!tid) {
         const draftThread = createDraftThread();
         tid = draftThread.id;
       }
 
-      // If this is a draft thread, persist it now
       if (isDraftThread(tid)) {
         const title = text.length > 50 ? text.slice(0, 50) + "..." : text;
         const realThread = await persistThread(tid, title);
@@ -72,10 +66,8 @@ export default function DashboardPage() {
         titledThreadsRef.current.add(tid);
       }
 
-      // Send the message with the real thread ID
       await sendMessage(text, tid);
 
-      // Auto-title: after first user message, set the thread title (for non-draft threads)
       if (tid && !titledThreadsRef.current.has(tid)) {
         titledThreadsRef.current.add(tid);
         const title = text.length > 50 ? text.slice(0, 50) + "..." : text;
@@ -92,11 +84,9 @@ export default function DashboardPage() {
     ],
   );
 
-  // Handle suggestion click from welcome screen
   const handleSuggestionClick = useCallback(
     async (prompt) => {
       setInput(prompt);
-      // Use a small delay to ensure state is set before sending
       setTimeout(() => {
         handleSendMessage(prompt);
       }, 50);
@@ -104,33 +94,30 @@ export default function DashboardPage() {
     [setInput, handleSendMessage],
   );
 
+  const displayName =
+    user?.firstName ||
+    user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] ||
+    "you";
+
   return (
-    <div className="flex h-screen bg-background">
-      {/* Sidebar */}
-      <aside className="w-64 border-r border-border flex flex-col">
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <Link href="/dashboard">
-            <span className="text-sm font-semibold text-foreground">
-              Job Board AI
+    <div className="flex h-screen bg-[#fafaf7] dark:bg-[#0a0a0f] text-slate-900 dark:text-slate-100">
+      <aside className="hidden w-72 shrink-0 flex-col border-r border-slate-200/70 bg-[#f5f4ef]/60 dark:border-slate-800/70 dark:bg-[#0b0b11]/70 md:flex">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4">
+          <Link href="/dashboard" className="group flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-[10px] bg-gradient-to-br from-slate-900 to-slate-700 dark:from-white dark:to-slate-300">
+              <Sparkles
+                className="h-3.5 w-3.5 text-white dark:text-slate-900"
+                strokeWidth={2.5}
+              />
+            </span>
+            <span className="text-sm font-semibold tracking-tight">
+              Jobboard
+              <span className="text-slate-400 dark:text-slate-500">·</span>AI
             </span>
           </Link>
-          <div className="flex items-center gap-2">
-            {user && (
-              <span className="text-xs text-muted-foreground hidden sm:block">
-                {user.firstName ||
-                  user.emailAddresses?.[0]?.emailAddress?.split("@")[0]}
-              </span>
-            )}
-            <UserButton
-              appearance={{
-                elements: {
-                  avatarBox: "h-8 w-8",
-                },
-              }}
-            />
-          </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+
+        <div className="flex-1 overflow-y-auto px-3 pb-3">
           <ChatSidebar
             threads={threads}
             activeThreadId={activeThreadId}
@@ -141,10 +128,25 @@ export default function DashboardPage() {
             onRenameThread={updateThreadTitle}
           />
         </div>
+
+        <div className="border-t border-slate-200/70 px-3 py-3 dark:border-slate-800/70">
+          <div className="flex items-center gap-3 rounded-xl px-2 py-1.5 hover:bg-slate-200/50 dark:hover:bg-slate-800/40">
+            <UserButton
+              appearance={{
+                elements: { avatarBox: "h-8 w-8" },
+              }}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{displayName}</p>
+              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                Personal workspace
+              </p>
+            </div>
+          </div>
+        </div>
       </aside>
 
-      {/* Main chat area */}
-      <main className="flex-1 flex flex-col">
+      <main className="flex flex-1 flex-col bg-transparent">
         <ChatThread
           messages={messages}
           input={input}

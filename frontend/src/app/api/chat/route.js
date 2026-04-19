@@ -2,7 +2,7 @@ import { getAuth } from "@clerk/nextjs/server";
 import { streamText, convertToModelMessages } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
@@ -191,6 +191,12 @@ export async function POST(req) {
     if (!clerkToken) {
       return textResponse("⚠️ You need to sign in to see your saved jobs.");
     }
+
+    // Declare error variables in outer scope so they're accessible in the catch block
+    let fetchError = null;
+    let evalError = null;
+    let resultsError = null;
+
     try {
       // Look for config ID in conversation context first
       let configId = null;
@@ -229,44 +235,112 @@ export async function POST(req) {
           ? `?platforms=${encodeURIComponent(selectedPlatforms.join(","))}`
           : "";
 
-      // Step 1: Fetch fresh jobs from platforms
-      const fetchRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/fetch${platformsQuery}`,
-        {
-          method: "POST",
-          headers: authHeaders,
-        },
-      );
-
+      // Step 1: Fetch fresh jobs from platforms (with timeout)
       let fetchData = { total_inserted: 0 };
-      if (fetchRes.ok) {
-        fetchData = await fetchRes.json();
+      try {
+        const fetchController = new AbortController();
+        const fetchTimeout = setTimeout(() => fetchController.abort(), 35000); // 35s timeout
+
+        const fetchRes = await fetch(
+          `${BACKEND_URL}/api/configs/${configId}/fetch${platformsQuery}`,
+          {
+            method: "POST",
+            headers: authHeaders,
+            signal: fetchController.signal,
+          },
+        );
+        clearTimeout(fetchTimeout);
+
+        if (fetchRes.ok) {
+          fetchData = await fetchRes.json();
+        } else if (fetchRes.status >= 500) {
+          fetchError = `Backend error ${fetchRes.status} while fetching jobs`;
+        }
+      } catch (err) {
+        if (err.name === "AbortError") {
+          fetchError =
+            "Job fetching took too long. This happens on first request - please try again!";
+        } else {
+          fetchError = `Failed to fetch: ${err.message}`;
+        }
+        console.error("Fetch error:", err);
       }
 
       // Step 2: Evaluate the jobs (use total_inserted to ensure all are evaluated)
-      const evalLimit = Math.max(20, fetchData.total_inserted || 0);
-      const evalRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=${evalLimit}${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
-        {
-          method: "POST",
-          headers: authHeaders,
-        },
-      );
-
       let evalData = { evaluated: 0 };
-      if (evalRes.ok) {
-        evalData = await evalRes.json();
+      try {
+        const evalLimit = Math.max(20, fetchData.total_inserted || 0);
+        const evalController = new AbortController();
+        const evalTimeout = setTimeout(() => evalController.abort(), 35000);
+
+        const evalRes = await fetch(
+          `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=${evalLimit}${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
+          {
+            method: "POST",
+            headers: authHeaders,
+            signal: evalController.signal,
+          },
+        );
+        clearTimeout(evalTimeout);
+
+        if (evalRes.ok) {
+          evalData = await evalRes.json();
+        } else if (evalRes.status >= 500) {
+          evalError = `Backend error ${evalRes.status} while evaluating jobs`;
+        }
+      } catch (err) {
+        if (err.name === "AbortError") {
+          evalError = "Job evaluation took too long";
+        } else {
+          evalError = `Evaluation failed: ${err.message}`;
+        }
+        console.error("Eval error:", err);
       }
 
       // Step 3: Get the results (sorted by score)
-      const resultsRes = await fetch(
-        `${BACKEND_URL}/api/configs/${configId}/results?limit=50${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
-        {
-          headers: authHeaders,
-        },
-      );
-      if (!resultsRes.ok) throw new Error("Failed to fetch results");
-      const results = await resultsRes.json();
+      let results = { jobs: [] };
+      try {
+        const resultsController = new AbortController();
+        const resultsTimeout = setTimeout(
+          () => resultsController.abort(),
+          35000,
+        );
+
+        const resultsRes = await fetch(
+          `${BACKEND_URL}/api/configs/${configId}/results?limit=50${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
+          {
+            headers: authHeaders,
+            signal: resultsController.signal,
+          },
+        );
+        clearTimeout(resultsTimeout);
+
+        if (!resultsRes.ok) {
+          resultsError = `Failed to fetch results (${resultsRes.status})`;
+        } else {
+          results = await resultsRes.json();
+        }
+      } catch (err) {
+        resultsError =
+          err.name === "AbortError"
+            ? "Results fetch timed out"
+            : `Results error: ${err.message}`;
+        console.error("Results error:", err);
+      }
+
+      // If we had any timeouts or errors, but still got some jobs, show them anyway
+      if (
+        (fetchError || evalError || resultsError) &&
+        results.jobs &&
+        results.jobs.length === 0
+      ) {
+        const errorDetails = [fetchError, evalError, resultsError]
+          .filter(Boolean)
+          .join("\n");
+        throw new Error(
+          errorDetails || "Failed to fetch jobs from all sources",
+        );
+      }
 
       const rawJobs = results.jobs || [];
       if (rawJobs.length === 0) {
@@ -307,9 +381,29 @@ export async function POST(req) {
       return textResponse(content);
     } catch (err) {
       console.error("Error fetching jobs:", err);
-      return textResponse(
-        "⚠️ Oops, something went wrong fetching your jobs. Please try again.",
-      );
+
+      // Provide more helpful error message based on the specific error
+      let errorMsg = "⚠️ Oops, something went wrong fetching your jobs.";
+
+      if (fetchError) {
+        errorMsg += `\n\n${fetchError}`;
+      }
+      if (evalError) {
+        errorMsg += `\n\n${evalError}`;
+      }
+      if (resultsError) {
+        errorMsg += `\n\n${resultsError}`;
+      }
+
+      if (!fetchError && !evalError && !resultsError) {
+        errorMsg +=
+          "\n\nPlease try again. If this keeps happening, there may be a temporary issue with the job fetching services.";
+      } else {
+        errorMsg +=
+          "\n\nTip: On the first request, job fetching can take longer as we search multiple platforms. Try again in a moment!";
+      }
+
+      return textResponse(errorMsg);
     }
   }
 

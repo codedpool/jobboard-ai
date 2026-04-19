@@ -4,12 +4,9 @@ import { memo, useState, useCallback } from "react";
 import {
   CheckIcon,
   CopyIcon,
-  RefreshCwIcon,
   MoreHorizontalIcon,
-  BotIcon,
+  Sparkles,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PlatformSelector } from "./PlatformSelector";
@@ -71,7 +68,7 @@ const UserMessage = memo(({ message }) => {
       data-role="user"
     >
       <div className="relative col-start-2 min-w-0">
-        <div className="wrap-break-word rounded-2xl bg-primary/10 border border-primary/20 px-4 py-2.5 text-foreground">
+        <div className="wrap-break-word rounded-2xl rounded-br-md bg-slate-900/[0.06] border border-slate-900/[0.04] px-4 py-2.5 text-[15px] leading-relaxed text-slate-900 dark:bg-white/[0.08] dark:border-white/[0.06] dark:text-slate-100">
           {message.content}
         </div>
       </div>
@@ -135,88 +132,75 @@ const AssistantMessage = memo(
 
     return (
       <div
-        className="fade-in slide-in-from-bottom-1 relative mx-auto w-full max-w-3xl animate-in py-3 duration-150"
+        className="group fade-in slide-in-from-bottom-1 relative mx-auto w-full max-w-3xl animate-in py-4 duration-150"
         data-role="assistant"
       >
-        {/* Avatar indicator */}
-        <div className="mb-1.5 ml-2 flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded-full bg-primary/10 border border-primary/20">
-            <BotIcon className="size-3.5 text-primary" />
-          </div>
-          <span className="text-xs font-medium text-muted-foreground">
-            Assistant
+        <div className="flex items-start gap-3">
+          <span className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-sky-500 text-white">
+            <Sparkles className="size-3" strokeWidth={2.5} />
           </span>
-          {isCurrentlyStreaming && (
-            <span className="text-xs text-primary/70 animate-pulse">
-              typing...
-            </span>
-          )}
-        </div>
-
-        <div className="wrap-break-word px-2 text-foreground leading-relaxed">
-          {/* Show streaming placeholder if empty and streaming */}
-          {isEmpty && isCurrentlyStreaming ? (
-            <StreamingDots />
-          ) : (
-            <>
-              {/* Markdown content */}
-              {displayContent && <MarkdownRenderer content={displayContent} />}
-
-              {/* Job tiles */}
-              {showJobs && <JobListMessage content={content} />}
-
-              {/* Platform Selector */}
-              {askingForPlatforms && !isSelectingPlatforms && (
-                <div className="mt-4">
-                  <PlatformSelector
-                    onSelect={handlePlatformSelect}
-                    isLoading={isSelectingPlatforms}
-                  />
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Action Bar - Show when not streaming and has content */}
-        {!isCurrentlyStreaming && displayContent && !askingForPlatforms && (
-          <div className="mt-1 ml-2 flex min-h-6 items-center gap-1 text-muted-foreground">
-            <TooltipIconButton
-              tooltip={isCopied ? "Copied!" : "Copy"}
-              onClick={handleCopy}
-            >
-              {isCopied ? (
-                <CheckIcon className="size-4" />
+          <div className="min-w-0 flex-1">
+            <div className="wrap-break-word text-[15px] leading-relaxed text-slate-800 dark:text-slate-200">
+              {isEmpty && isCurrentlyStreaming ? (
+                <StreamingDots />
               ) : (
-                <CopyIcon className="size-4" />
-              )}
-            </TooltipIconButton>
+                <>
+                  {displayContent && <MarkdownRenderer content={displayContent} />}
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+                  {showJobs && <JobListMessage content={content} />}
+
+                  {askingForPlatforms && !isSelectingPlatforms && (
+                    <div className="mt-4">
+                      <PlatformSelector
+                        onSelect={handlePlatformSelect}
+                        isLoading={isSelectingPlatforms}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {!isCurrentlyStreaming && displayContent && !askingForPlatforms && (
+              <div className="mt-2 flex min-h-6 items-center gap-1 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100 dark:text-slate-500">
                 <TooltipIconButton
-                  tooltip="More"
-                  className="data-[state=open]:bg-accent"
-                >
-                  <MoreHorizontalIcon className="size-4" />
-                </TooltipIconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="bottom"
-                align="start"
-                className="min-w-32"
-              >
-                <DropdownMenuItem
+                  tooltip={isCopied ? "Copied!" : "Copy"}
                   onClick={handleCopy}
-                  className="flex cursor-pointer items-center gap-2"
                 >
-                  <CopyIcon className="size-4" />
-                  Copy as text
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  {isCopied ? (
+                    <CheckIcon className="size-4" />
+                  ) : (
+                    <CopyIcon className="size-4" />
+                  )}
+                </TooltipIconButton>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <TooltipIconButton
+                      tooltip="More"
+                      className="data-[state=open]:bg-accent"
+                    >
+                      <MoreHorizontalIcon className="size-4" />
+                    </TooltipIconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    side="bottom"
+                    align="start"
+                    className="min-w-32"
+                  >
+                    <DropdownMenuItem
+                      onClick={handleCopy}
+                      className="flex cursor-pointer items-center gap-2"
+                    >
+                      <CopyIcon className="size-4" />
+                      Copy as text
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     );
   },

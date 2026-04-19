@@ -6,7 +6,6 @@ import {
   MoreHorizontalIcon,
   TrashIcon,
   PencilIcon,
-  MessageSquareIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -28,52 +27,58 @@ export const ChatSidebar = memo(
     onDeleteThread,
     onRenameThread,
   }) => {
+    const visible = threads.filter((t) => !t.id.startsWith("draft-"));
+
     return (
-      <div className="flex flex-col gap-1 p-2">
-        {/* New Thread Button */}
-        <Button
-          variant="outline"
-          className="h-9 justify-start gap-2 rounded-lg px-3 text-sm hover:bg-muted"
+      <div className="flex flex-col gap-4 pt-2">
+        <button
           onClick={onNewThread}
+          className="group flex h-9 items-center justify-between rounded-xl border border-slate-200/80 bg-white/60 px-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-white dark:border-slate-800/80 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:bg-slate-900/70"
         >
-          <PlusIcon className="size-4" />
-          New Chat
-        </Button>
+          <span className="inline-flex items-center gap-2">
+            <PlusIcon className="h-4 w-4" strokeWidth={2} />
+            New chat
+          </span>
+          <kbd className="hidden rounded-md border border-slate-200 bg-white px-1.5 font-mono text-[10px] text-slate-500 group-hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 sm:inline-block">
+            ⌘K
+          </kbd>
+        </button>
 
-        {/* Loading State */}
-        {loading && <ThreadListSkeleton />}
+        <div>
+          <p className="px-2 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+            Conversations
+          </p>
 
-        {/* Thread List - filter out draft threads with no title */}
-        {!loading && (
-          <div className="flex flex-col gap-0.5 mt-1">
-            {threads.filter((t) => !t.id.startsWith("draft-")).length === 0 ? (
-              <div className="px-3 py-2 text-sm text-muted-foreground">
-                No conversations yet
-              </div>
-            ) : (
-              threads
-                .filter((t) => !t.id.startsWith("draft-"))
-                .map((thread) => (
-                  <ThreadItem
-                    key={thread.id}
-                    thread={thread}
-                    isActive={thread.id === activeThreadId}
-                    onSelect={() => onSelectThread(thread.id)}
-                    onDelete={() => onDeleteThread(thread.id)}
-                    onRename={(newTitle) => onRenameThread(thread.id, newTitle)}
-                  />
-                ))
-            )}
-          </div>
-        )}
+          {loading && <ThreadListSkeleton />}
+
+          {!loading && visible.length === 0 && (
+            <p className="px-2 py-3 text-sm text-slate-500 dark:text-slate-400">
+              Nothing here yet — ask your first question.
+            </p>
+          )}
+
+          {!loading && visible.length > 0 && (
+            <div className="flex flex-col">
+              {visible.map((thread) => (
+                <ThreadItem
+                  key={thread.id}
+                  thread={thread}
+                  isActive={thread.id === activeThreadId}
+                  onSelect={() => onSelectThread(thread.id)}
+                  onDelete={() => onDeleteThread(thread.id)}
+                  onRename={(newTitle) => onRenameThread(thread.id, newTitle)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
-  }
+  },
 );
 
 ChatSidebar.displayName = "ChatSidebar";
 
-// Individual thread item
 const ThreadItem = memo(
   ({ thread, isActive, onSelect, onDelete, onRename }) => {
     const [isRenaming, setIsRenaming] = useState(false);
@@ -93,7 +98,7 @@ const ThreadItem = memo(
 
     if (isRenaming) {
       return (
-        <div className="flex h-9 items-center gap-2 rounded-lg bg-muted px-3">
+        <div className="flex h-9 items-center gap-2 rounded-lg bg-slate-200/60 px-3 dark:bg-slate-800/60">
           <input
             type="text"
             value={renameValue}
@@ -115,17 +120,31 @@ const ThreadItem = memo(
     return (
       <div
         className={cn(
-          "group flex h-9 items-center gap-2 rounded-lg transition-colors",
-          "hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
-          isActive && "bg-muted"
+          "group relative flex h-9 items-center gap-1 rounded-lg pl-3 pr-1 transition-colors",
+          isActive
+            ? "bg-slate-200/60 dark:bg-slate-800/60"
+            : "hover:bg-slate-200/40 dark:hover:bg-slate-800/40",
         )}
       >
+        <span
+          aria-hidden
+          className={cn(
+            "absolute left-0 top-1.5 h-6 w-[2px] rounded-full transition-opacity",
+            isActive
+              ? "bg-gradient-to-b from-violet-500 to-sky-500 opacity-100"
+              : "opacity-0",
+          )}
+        />
         <button
-          className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 text-start text-sm"
           onClick={onSelect}
+          className={cn(
+            "min-w-0 flex-1 truncate text-left text-sm transition-colors",
+            isActive
+              ? "font-medium text-slate-900 dark:text-white"
+              : "text-slate-600 dark:text-slate-400",
+          )}
         >
-          <MessageSquareIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+          {displayTitle}
         </button>
 
         <DropdownMenu>
@@ -134,20 +153,16 @@ const ThreadItem = memo(
               variant="ghost"
               size="icon"
               className={cn(
-                "mr-2 size-7 p-0 opacity-0 transition-opacity",
-                "group-hover:opacity-100 data-[state=open]:bg-accent data-[state=open]:opacity-100",
-                isActive && "opacity-100"
+                "size-7 shrink-0 p-0 opacity-0 transition-opacity",
+                "group-hover:opacity-100 data-[state=open]:opacity-100",
+                isActive && "opacity-60",
               )}
             >
               <MoreHorizontalIcon className="size-4" />
               <span className="sr-only">More options</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side="bottom"
-            align="start"
-            className="min-w-32"
-          >
+          <DropdownMenuContent side="bottom" align="end" className="min-w-32">
             <DropdownMenuItem
               onClick={() => {
                 setRenameValue(thread.title || "");
@@ -169,23 +184,17 @@ const ThreadItem = memo(
         </DropdownMenu>
       </div>
     );
-  }
+  },
 );
 
 ThreadItem.displayName = "ThreadItem";
 
-// Loading skeleton
 const ThreadListSkeleton = () => {
   return (
-    <div className="flex flex-col gap-1 mt-1">
+    <div className="flex flex-col gap-1">
       {Array.from({ length: 5 }, (_, i) => (
-        <div
-          key={i}
-          className="flex h-9 items-center px-3"
-          role="status"
-          aria-label="Loading threads"
-        >
-          <Skeleton className="h-4 w-full" />
+        <div key={i} className="flex h-9 items-center px-3" role="status">
+          <Skeleton className="h-3 w-full" />
         </div>
       ))}
     </div>

@@ -1,4 +1,6 @@
-from typing import Any, Dict, List, Optional
+import asyncio
+import logging
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_clerk_auth import HTTPAuthorizationCredentials
@@ -15,6 +17,7 @@ from app.services.remoteok_fetcher import fetch_remoteok_jobs
 from app.services.remotive_fetcher import fetch_remotive_jobs
 from app.services.yc_fetcher import fetch_yc_jobs
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["fetch"])
 
 
@@ -32,6 +35,30 @@ def _job_result_to_dict(j: JobResult) -> Dict[str, Any]:
         "reason": j.reason,
         "created_at": j.created_at.isoformat() if j.created_at else None,
     }
+
+
+async def _fetch_platform_safe(
+    platform: str,
+    fetch_func,
+    config: JobConfig,
+    db: AsyncSession,
+) -> Tuple[List[JobResult], int, Optional[str]]:
+    """
+    Safely fetch jobs from a single platform with error handling.
+    Returns (results, skipped_count, error_message).
+    """
+    try:
+        logger.info(f"Fetching jobs from {platform}...")
+        import time
+        start = time.time()
+        results, skipped = await fetch_func(config, db)
+        elapsed = time.time() - start
+        logger.info(f"✓ {platform} completed in {elapsed:.2f}s: {len(results)} jobs, {skipped} skipped")
+        return results, skipped, None
+    except Exception as e:
+        error_msg = f"{platform} failed: {str(e)}"
+        logger.warning(error_msg, exc_info=True)
+        return [], 0, error_msg
 
 
 @router.post("/configs/{config_id}/fetch")
@@ -67,66 +94,54 @@ async def fetch_jobs_for_config(
         # Default to all platforms
         selected_platforms = ["remoteok", "remotive", "github", "hn", "yc"]
 
-    all_results: List[JobResult] = []
+    # Initialize all counts/skipped to 0
     counts = {}
     skipped = {}
-
-    # Initialize all counts/skipped to 0
     for p in ["remoteok", "remotive", "hn", "github", "yc"]:
         counts[p] = 0
         skipped[p] = 0
 
-    # ── RemoteOK ────────────────────────────────────────────────────────────────
+    # Create parallel fetch tasks for selected platforms
+    tasks = []
+    platform_order = []
+
     if "remoteok" in selected_platforms:
-        remoteok_results, remoteok_skipped = await fetch_remoteok_jobs(config, db)
-        all_results.extend(remoteok_results)
-        counts["remoteok"] = len(remoteok_results)
-        skipped["remoteok"] = remoteok_skipped
-    else:
-        remoteok_skipped = 0
+        tasks.append(_fetch_platform_safe("remoteok", fetch_remoteok_jobs, config, db))
+        platform_order.append("remoteok")
 
-    # ── Remotive ────────────────────────────────────────────────────────────────
     if "remotive" in selected_platforms:
-        remotive_results, remotive_skipped = await fetch_remotive_jobs(config, db)
-        all_results.extend(remotive_results)
-        counts["remotive"] = len(remotive_results)
-        skipped["remotive"] = remotive_skipped
-    else:
-        remotive_skipped = 0
+        tasks.append(_fetch_platform_safe("remotive", fetch_remotive_jobs, config, db))
+        platform_order.append("remotive")
 
-    # ── HN "Who's Hiring" ───────────────────────────────────────────────────────
     if "hn" in selected_platforms or "hackernews" in selected_platforms:
-        hn_results, hn_skipped = await fetch_hn_jobs(config, db)
-        all_results.extend(hn_results)
-        counts["hn"] = len(hn_results)
-        skipped["hn"] = hn_skipped
-    else:
-        hn_skipped = 0
+        tasks.append(_fetch_platform_safe("hn", fetch_hn_jobs, config, db))
+        platform_order.append("hn")
 
-    # ── GitHub hiring issues ─────────────────────────────────────────────────────
     if "github" in selected_platforms:
-        github_results, github_skipped = await fetch_github_jobs(config, db)
-        all_results.extend(github_results)
-        counts["github"] = len(github_results)
-        skipped["github"] = github_skipped
-    else:
-        github_skipped = 0
+        tasks.append(_fetch_platform_safe("github", fetch_github_jobs, config, db))
+        platform_order.append("github")
 
-    # ── YC job board (stub – best-effort, non-blocking) ──────────────────────────
-    yc_skipped = 0
     if "yc" in selected_platforms or "ycombinator" in selected_platforms:
-        try:
-            yc_results, yc_skipped = await fetch_yc_jobs(config, db)
-            all_results.extend(yc_results)
-            counts["yc"] = len(yc_results)
-            skipped["yc"] = yc_skipped
-        except Exception:
-            pass
+        tasks.append(_fetch_platform_safe("yc", fetch_yc_jobs, config, db))
+        platform_order.append("yc")
+
+    # Run all fetchers in parallel
+    logger.info(f"Starting parallel fetch for: {', '.join(platform_order)}")
+    results = await asyncio.gather(*tasks)
+
+    # Aggregate results
+    all_results: List[JobResult] = []
+    for idx, (platform_results, platform_skipped, error_msg) in enumerate(results):
+        platform_name = platform_order[idx]
+        counts[platform_name] = len(platform_results)
+        skipped[platform_name] = platform_skipped
+        all_results.extend(platform_results)
 
     await db.commit()
 
     total_skipped = sum(skipped.values())
 
+    logger.info(f"Fetch complete: {len(all_results)} total jobs, {total_skipped} skipped")
     return {
         "config_id": str(config.id),
         "counts": counts,

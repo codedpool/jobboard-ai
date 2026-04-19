@@ -116,23 +116,16 @@ export const ChatThread = memo(
     }, [isNearBottom]);
 
     return (
-      <div
-        className="flex h-full flex-col bg-background"
-        style={{
-          "--thread-max-width": "44rem",
-          "--composer-radius": "24px",
-          "--composer-padding": "10px",
-        }}
-      >
+      <div className="flex h-full flex-col">
         <div
           ref={viewportRef}
           onScroll={handleScroll}
-          className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto scroll-smooth px-4 pt-4"
+          className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto scroll-smooth px-4 pt-6"
         >
           {isEmpty ? (
             <ChatWelcome onSuggestionClick={handleSuggestionClick} />
           ) : (
-            <div className="flex flex-col">
+            <div className="flex flex-col pb-6">
               {messages.map((message, index) => (
                 <ChatMessage
                   key={message.id || index}
@@ -145,9 +138,9 @@ export const ChatThread = memo(
             </div>
           )}
 
-          {/* Footer with scroll button and composer */}
-          <div className="sticky bottom-0 mx-auto mt-auto flex w-full max-w-3xl flex-col gap-4 overflow-visible rounded-t-3xl bg-background pb-4 md:pb-6">
-            {/* Scroll to bottom button */}
+          <div className="sticky bottom-0 mx-auto mt-auto flex w-full max-w-3xl flex-col gap-3 pb-5">
+            <div className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-[#fafaf7] to-transparent dark:from-[#0a0a0f]" />
+
             <ScrollToBottomButton
               onClick={() => {
                 shouldAutoScrollRef.current = true;
