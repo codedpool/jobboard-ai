@@ -253,6 +253,24 @@ export async function POST(req) {
 
         if (fetchRes.ok) {
           fetchData = await fetchRes.json();
+        } else if (fetchRes.status === 402) {
+          // Quota exceeded — surface the pay prompt directly to the user.
+          const payload = await fetchRes.json().catch(() => ({}));
+          const detail = payload?.detail || {};
+          const url = detail.payment_url || "https://forms.gle/8zy2rTX2QAJPtheY6";
+          const used = detail.searches_used;
+          const limit = detail.searches_limit;
+          const usage =
+            typeof used === "number" && typeof limit === "number"
+              ? `**${used} / ${limit}** searches used.\n\n`
+              : "";
+          return textResponse(
+            `### You've hit your search limit\n\n` +
+              usage +
+              `To keep searching, please fill out this short form and we'll upgrade your account:\n\n` +
+              `👉 [Continue to payment form](${url})\n\n` +
+              `*Once you've submitted the form, reach out and an admin will flip the switch on your account.*`,
+          );
         } else if (fetchRes.status >= 500) {
           fetchError = `Backend error ${fetchRes.status} while fetching jobs`;
         }

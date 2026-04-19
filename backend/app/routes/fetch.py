@@ -11,6 +11,7 @@ from app.auth.deps import get_clerk_auth
 from app.db.session import get_db
 from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
+from app.services.quota import PAYMENT_FORM_URL, consume_search
 from app.services.github_fetcher import fetch_github_jobs
 from app.services.hn_fetcher import fetch_hn_jobs
 from app.services.remoteok_fetcher import fetch_remoteok_jobs
@@ -72,6 +73,8 @@ async def fetch_jobs_for_config(
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token: no sub claim")
 
+    email = credentials.decoded.get("email") or credentials.decoded.get("primary_email_address")
+
     # Load config and ensure it belongs to this user
     result = await db.execute(select(JobConfig).where(JobConfig.id == config_id))
     config = result.scalar_one_or_none()
@@ -81,6 +84,26 @@ async def fetch_jobs_for_config(
 
     if config.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not your config")
+
+    # Enforce per-user search quota before running expensive fetch work.
+    decision = await consume_search(db, user_id=user_id, email=email)
+    if not decision.allowed:
+        await db.commit()
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "quota_exceeded",
+                "plan": decision.plan,
+                "searches_used": decision.searches_used,
+                "searches_limit": decision.searches_limit,
+                "payment_url": PAYMENT_FORM_URL,
+                "message": (
+                    "You've used all your free job searches. "
+                    "Fill out this short form to continue: "
+                    f"{PAYMENT_FORM_URL}"
+                ),
+            },
+        )
 
     # Determine which platforms to fetch from
     selected_platforms = []

@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(timeout 25 npx next build)"
+      "Bash(timeout 25 npx next build)",
+      "Bash(xargs grep *)",
+      "Bash(xargs ls *)",
+      "Bash(xargs basename *)",
+      "Bash(timeout 60 npx next build)",
+      "Bash(python -c ' *)",
+      "Bash(D:/jobboard-ai/backend/venv/Scripts/python.exe -c \" import os os.environ.setdefault\\('CLERK_FRONTEND_API', 'example.clerk.accounts.dev'\\) os.environ.setdefault\\('DATABASE_URL', 'postgresql+asyncpg://user:pass@localhost/x'\\) from app.main import app from app.routes.admin import router print\\('admin routes:'\\) for r in router.routes: print\\(' ', sorted\\(getattr\\(r, 'methods', []\\) or []\\), r.path\\) print\\('OK'\\) \")",
+      "Bash(D:/jobboard-ai/backend/venv/Scripts/python.exe -c ' *)"
     ]
   }
 }
