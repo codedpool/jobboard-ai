@@ -18,6 +18,17 @@ h11==0.16.0
 httpcore==1.0.9
 httptools==0.7.1
 httpx==0.28.1
+# JobSpy + its runtime deps. Installed with --no-deps because the pinned
+# numpy==1.26.3 in python-jobspy's own metadata can't build on Python 3.14;
+# a newer numpy works fine with modern pandas.
+python-jobspy==1.1.82
+tls-client==1.0.1
+markdownify==1.2.2
+regex==2026.4.4
+pandas>=2.2
+numpy>=2.0
+requests>=2.32
+python-dateutil>=2.9
 idna==3.11
 Mako==1.3.10
 MarkupSafe==3.0.3

@@ -7,12 +7,23 @@ from app.db.base import Base
 # Forward-only column additions. Safe to run on every startup — Postgres's
 # "ADD COLUMN IF NOT EXISTS" is idempotent.
 _COLUMN_PATCHES: list[str] = [
+    # user_status quota/plan additions
     "ALTER TABLE user_status ADD COLUMN IF NOT EXISTS plan VARCHAR NOT NULL DEFAULT 'free'",
     "ALTER TABLE user_status ADD COLUMN IF NOT EXISTS plan_started_at TIMESTAMPTZ",
     "ALTER TABLE user_status ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMPTZ",
     "ALTER TABLE user_status ADD COLUMN IF NOT EXISTS plan_granted_by VARCHAR",
     "ALTER TABLE user_status ADD COLUMN IF NOT EXISTS plan_searches_used INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE user_status ADD COLUMN IF NOT EXISTS free_searches_used INTEGER NOT NULL DEFAULT 0",
+    # job_results richer metadata + per-dim scores
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS skills_match INTEGER",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS seniority_match INTEGER",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS location_match INTEGER",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS salary_min INTEGER",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS salary_max INTEGER",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS salary_currency VARCHAR",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS date_posted TIMESTAMPTZ",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS is_remote BOOLEAN",
+    "ALTER TABLE job_results ADD COLUMN IF NOT EXISTS job_type VARCHAR",
 ]
 
 

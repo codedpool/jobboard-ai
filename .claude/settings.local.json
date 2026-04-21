@@ -10,7 +10,8 @@
       "Bash(D:/jobboard-ai/backend/venv/Scripts/python.exe -c \" import os os.environ.setdefault\\('CLERK_FRONTEND_API', 'example.clerk.accounts.dev'\\) os.environ.setdefault\\('DATABASE_URL', 'postgresql+asyncpg://user:pass@localhost/x'\\) from app.main import app from app.routes.admin import router print\\('admin routes:'\\) for r in router.routes: print\\(' ', sorted\\(getattr\\(r, 'methods', []\\) or []\\), r.path\\) print\\('OK'\\) \")",
       "Bash(D:/jobboard-ai/backend/venv/Scripts/python.exe -c ' *)",
       "Bash(D:/jobboard-ai/backend/venv/Scripts/python.exe *)",
-      "Bash(curl -s -o /dev/null -w \"backend :8000 -> HTTP %{http_code}\\\\n\" --max-time 3 http://localhost:8000/health)"
+      "Bash(curl -s -o /dev/null -w \"backend :8000 -> HTTP %{http_code}\\\\n\" --max-time 3 http://localhost:8000/health)",
+      "Bash(wait)"
     ]
   }
 }

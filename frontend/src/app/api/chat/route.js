@@ -164,13 +164,30 @@ export async function POST(req) {
     } catch (_) {}
   }
 
-  // Grab an auth token to forward to the Python backend when needed
+  // Auth-state snapshot. The token itself is NOT captured once — the chat
+  // pipeline runs three backend calls serially and can take 25–35s overall,
+  // which is long enough for a single Clerk JWT (≤60s lifetime + clock skew)
+  // to go stale between steps and trigger a 403 on the trailing /results hit.
+  // Instead we mint a fresh token right before each backend call.
   const authState = getAuth(req);
-  const clerkToken =
-    authState && authState.sessionId
+
+  async function freshAuthHeaders() {
+    const token = authState?.sessionId
       ? await authState.getToken().catch(() => null)
       : null;
+    return token
+      ? {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        }
+      : { "Content-Type": "application/json" };
+  }
 
+  // One snapshot we use up-front for the cheap parse/configs calls — those
+  // fire within the first second so reuse is safe.
+  const clerkToken = authState?.sessionId
+    ? await authState.getToken().catch(() => null)
+    : null;
   const authHeaders = clerkToken
     ? {
         "Content-Type": "application/json",
@@ -245,7 +262,7 @@ export async function POST(req) {
           `${BACKEND_URL}/api/configs/${configId}/fetch${platformsQuery}`,
           {
             method: "POST",
-            headers: authHeaders,
+            headers: await freshAuthHeaders(),
             signal: fetchController.signal,
           },
         );
@@ -295,7 +312,7 @@ export async function POST(req) {
           `${BACKEND_URL}/api/configs/${configId}/evaluate?limit=${evalLimit}${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
           {
             method: "POST",
-            headers: authHeaders,
+            headers: await freshAuthHeaders(),
             signal: evalController.signal,
           },
         );
@@ -327,7 +344,7 @@ export async function POST(req) {
         const resultsRes = await fetch(
           `${BACKEND_URL}/api/configs/${configId}/results?limit=50${platformsQuery ? "&platforms=" + encodeURIComponent(selectedPlatforms.join(",")) : ""}`,
           {
-            headers: authHeaders,
+            headers: await freshAuthHeaders(),
             signal: resultsController.signal,
           },
         );
@@ -369,11 +386,10 @@ export async function POST(req) {
         );
       }
 
-      // Sort by score (highest first) and filter to good matches
-      const sortedJobs = rawJobs
-        .filter((j) => j.score !== null)
-        .sort((a, b) => (b.score || 0) - (a.score || 0))
-        .slice(0, 10);
+      // Backend already applies confidence threshold + time decay and sorts
+      // by effective_score. We just pick the top 10 and forward the richer
+      // metadata so the UI can render per-dimension bars, salary, etc.
+      const sortedJobs = rawJobs.slice(0, 10);
 
       const jobsPayload = {
         config_id: configId,
@@ -385,7 +401,15 @@ export async function POST(req) {
           source: job.source,
           location: job.location,
           score: job.score,
+          effective_score: job.effective_score,
           reason: job.reason,
+          matches: job.matches || null,
+          salary_min: job.salary_min,
+          salary_max: job.salary_max,
+          salary_currency: job.salary_currency,
+          date_posted: job.date_posted,
+          is_remote: job.is_remote,
+          job_type: job.job_type,
         })),
       };
 

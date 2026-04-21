@@ -64,21 +64,39 @@ export function useChat({ threadId }) {
   }, [threadId]);
 
   /**
-   * Save a single message to the backend.
+   * Save a single message to the backend. Best-effort: the UI has already
+   * rendered the message, so a persist failure is not user-facing. We do one
+   * retry after a small delay to smooth over transient Clerk token refreshes
+   * that can produce a 401/403 when a long streaming request has just ended.
    */
   const persistMessage = useCallback(async (tid, role, content) => {
     if (!tid || tid.startsWith("draft-")) return;
-    try {
+
+    const attempt = async () => {
       const res = await fetch(`/api/threads/${tid}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role, content }),
       });
+      return res;
+    };
+
+    try {
+      let res = await attempt();
+      // Clerk JWTs are short-lived; a long-running stream can expire the one
+      // the route handler minted when the request started. Retry once — a
+      // fresh request gets a freshly-minted session token.
+      if ((res.status === 401 || res.status === 403) && typeof window !== "undefined") {
+        await new Promise((r) => setTimeout(r, 800));
+        res = await attempt();
+      }
       if (!res.ok) {
-        console.error("Failed to persist message:", res.status);
+        console.warn(
+          `Message persist failed (${res.status}); UI is unaffected, reload to re-fetch history.`,
+        );
       }
     } catch (err) {
-      console.error("Failed to persist message:", err);
+      console.warn("Message persist error:", err?.message || err);
     }
   }, []);
 

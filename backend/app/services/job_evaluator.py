@@ -4,7 +4,7 @@ import logging
 import os
 import random
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List, Sequence
 
 from groq import AsyncGroq, Groq
 
@@ -16,30 +16,53 @@ logger = logging.getLogger(__name__)
 GROQ_MODEL = os.getenv("GROQ_EVAL_MODEL", "llama-3.3-70b-versatile")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# Keep the description trimmed: most job postings repeat "perks / EEO boilerplate"
-# after the first ~800 chars. Cutting it saves 50–80% of tokens per call and
-# keeps us under Groq's 30k TPM free-tier limit without hurting accuracy.
-MAX_DESC_CHARS = 800
+# With batch-of-5 scoring we only send ~30 jobs through the LLM per search, so
+# we can afford a richer description window for better accuracy.
+MAX_DESC_CHARS = 1500
 MAX_RETRIES = 3
+DEFAULT_BATCH_SIZE = 5
 
 _RETRY_AFTER_RE = re.compile(r"try again in\s*([\d.]+)\s*(ms|s)", re.IGNORECASE)
 
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY environment variable is not set")
 
-# Keep the sync client for legacy callers; all new code paths use the async one
-# because the sync client blocks FastAPI's event loop.
 _client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 _async_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 
-_SYSTEM_PROMPT = (
+# ─── Prompts ────────────────────────────────────────────────────────────────
+
+_SINGLE_SYSTEM_PROMPT = (
     "You are a strict job matching evaluator. "
     "Always respond with a JSON object containing: "
     '{"score": int, "reason": string, "matches": {"skills_match": int, '
     '"seniority_match": int, "location_match": int}}.'
 )
 
+_BATCH_SYSTEM_PROMPT = (
+    "You are a rigorous job-matching evaluator. You receive a candidate's "
+    "preferences and up to 5 job postings identified by numeric indices. "
+    "Score each posting relative to the others so the differences are "
+    "meaningful — if one posting is clearly closer to the candidate's stack "
+    "and seniority than another, its scores should reflect that.\n\n"
+    "Score each of these dimensions 0–100:\n"
+    "  • skills_match    — how well the required stack/keywords overlap\n"
+    "  • seniority_match — is the level (intern/junior/mid/senior/staff) right\n"
+    "  • location_match  — does location/remote policy fit the preference\n\n"
+    "Overall `score` should be a weighted blend (skills 45%, seniority 25%, "
+    "location 20%, generic signal 10%). The `reason` must be ONE sentence "
+    "citing the single strongest clue from the job text (max 140 chars).\n\n"
+    "Respond with EXACTLY this JSON shape and no extra text:\n"
+    '{"evaluations": [{"id": <int>, "score": <int>, "reason": "<string>", '
+    '"matches": {"skills_match": <int>, "seniority_match": <int>, '
+    '"location_match": <int>}}, ...]}\n'
+    "Include one entry per input job, in any order, using the integer id you "
+    "were given."
+)
+
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
 
 def _trim_desc(desc: str | None) -> str:
     if not desc:
@@ -50,18 +73,23 @@ def _trim_desc(desc: str | None) -> str:
     return desc[:MAX_DESC_CHARS].rsplit(" ", 1)[0] + "…"
 
 
-def build_job_prompt(config: JobConfig, job: JobResult) -> str:
+def _candidate_block(config: JobConfig) -> str:
     keywords = ", ".join(config.keywords or [])
     platforms = ", ".join(config.platforms or [])
-    return f"""
-You are an assistant that scores how well a job matches a candidate's preferences.
+    return (
+        f"Candidate preferences:\n"
+        f"- Role: {config.parsed_role or config.raw_query}\n"
+        f"- Keywords / tech stack: {keywords or 'none specified'}\n"
+        f"- Seniority: {config.seniority or 'unspecified'}\n"
+        f"- Location preference: {config.location_preference or 'unspecified'}\n"
+        f"- Platforms of interest: {platforms or 'unspecified'}"
+    )
 
-Candidate preferences (from config):
-- Role: {config.parsed_role or config.raw_query}
-- Keywords / tech stack: {keywords or "none specified"}
-- Seniority: {config.seniority or "unspecified"}
-- Location preference: {config.location_preference or "unspecified"}
-- Platforms: {platforms or "unspecified"}
+
+def build_job_prompt(config: JobConfig, job: JobResult) -> str:
+    """Single-job prompt kept for the legacy sync path."""
+    return f"""
+{_candidate_block(config)}
 
 Job posting:
 - Source: {job.source}
@@ -73,53 +101,79 @@ Job posting:
 {_trim_desc(job.description)}
 
 Guidelines:
-- Consider skills/keywords, seniority, location/remote fit, and any hints in description.
-- Score from 0 (terrible fit) to 100 (perfect fit).
-- Intern-level roles should get higher scores when seniority=intern, and lower otherwise.
-- Prefer remote or matching location when location_preference is set to remote or a specific region.
-- Be concise and specific in the reason, referencing exact clues from the job text.
+- Score 0 (terrible fit) to 100 (perfect fit).
+- Intern-level roles score higher when seniority=intern, lower otherwise.
+- Remote-friendly wins when location_preference mentions remote.
+- Cite the strongest clue from the job text in one concise sentence.
 """.strip()
 
 
-def _parse_completion(raw: str) -> Dict[str, Any]:
-    data = json.loads(raw)
+def _build_batch_prompt(config: JobConfig, jobs: Sequence[JobResult]) -> str:
+    blocks = []
+    for idx, job in enumerate(jobs):
+        blocks.append(
+            f"[id={idx}]\n"
+            f"Title: {job.title}\n"
+            f"Company: {job.company or 'Unknown'}\n"
+            f"Source: {job.source}\n"
+            f"Location: {job.location or 'Unknown'}\n"
+            f"Description: {_trim_desc(job.description)}"
+        )
+    joined = "\n\n---\n\n".join(blocks)
+    return f"{_candidate_block(config)}\n\nJobs to evaluate:\n\n{joined}"
 
+
+def _parse_single(raw: str) -> Dict[str, Any]:
+    data = json.loads(raw)
     score = int(data.get("score", 0))
     reason = str(data.get("reason", "")).strip()
-
     matches = data.get("matches") or {}
-    skills_match = int(matches.get("skills_match", score))
-    seniority_match = int(matches.get("seniority_match", score))
-    location_match = int(matches.get("location_match", score))
+    return _shape_result(score, reason, matches)
 
+
+def _shape_result(score: int, reason: str, matches: dict) -> Dict[str, Any]:
+    skills = int(matches.get("skills_match", score))
+    sen = int(matches.get("seniority_match", score))
+    loc = int(matches.get("location_match", score))
     return {
         "score": max(0, min(100, score)),
         "reason": reason or "No reason provided by evaluator.",
         "matches": {
-            "skills_match": max(0, min(100, skills_match)),
-            "seniority_match": max(0, min(100, seniority_match)),
-            "location_match": max(0, min(100, location_match)),
+            "skills_match": max(0, min(100, skills)),
+            "seniority_match": max(0, min(100, sen)),
+            "location_match": max(0, min(100, loc)),
         },
     }
 
 
+def _parse_batch(raw: str, expected: int) -> Dict[int, Dict[str, Any]]:
+    data = json.loads(raw)
+    out: Dict[int, Dict[str, Any]] = {}
+    for item in data.get("evaluations", []) or []:
+        try:
+            idx = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx >= expected:
+            continue
+        score = int(item.get("score", 0))
+        reason = str(item.get("reason", "")).strip()
+        matches = item.get("matches") or {}
+        out[idx] = _shape_result(score, reason, matches)
+    return out
+
+
+# ─── Rate limit handling ────────────────────────────────────────────────────
+
 def _retry_after_seconds(err: Exception) -> float | None:
-    """Pull the suggested delay out of Groq's rate-limit error message."""
-    # Prefer a Retry-After header if the SDK exposes it.
     response = getattr(err, "response", None)
     if response is not None:
-        header = None
         try:
             header = response.headers.get("retry-after")
-        except Exception:
-            header = None
-        if header:
-            try:
+            if header:
                 return float(header)
-            except (TypeError, ValueError):
-                pass
-
-    # Fallback: parse Groq's human-readable "try again in 1.39s / 514ms" hint.
+        except Exception:
+            pass
     m = _RETRY_AFTER_RE.search(str(err))
     if not m:
         return None
@@ -137,16 +191,10 @@ def _is_rate_limited(err: Exception) -> bool:
     return "429" in msg or "rate_limit" in msg or "rate limit" in msg
 
 
-async def evaluate_job_async(config: JobConfig, job: JobResult) -> Dict[str, Any]:
-    """Score a single job using AsyncGroq — safe to call under asyncio.gather.
-
-    Retries up to ``MAX_RETRIES`` times on 429 rate-limit responses, sleeping
-    for the delay Groq recommends (plus a small jitter) before each retry.
-    """
-    if not GROQ_API_KEY or _async_client is None:
+async def _call_groq_with_retries(messages, *, max_tokens: int) -> str:
+    """Shared rate-limit-aware call wrapper. Returns the raw JSON string."""
+    if _async_client is None:
         raise ValueError("GROQ_API_KEY environment variable is not set")
-
-    prompt = build_job_prompt(config, job)
 
     last_err: Exception | None = None
     for attempt in range(MAX_RETRIES):
@@ -154,45 +202,83 @@ async def evaluate_job_async(config: JobConfig, job: JobResult) -> Dict[str, Any
             completion = await _async_client.chat.completions.create(
                 model=GROQ_MODEL,
                 response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
                 temperature=0.2,
-                max_tokens=220,
+                max_tokens=max_tokens,
             )
-            return _parse_completion(completion.choices[0].message.content)
+            return completion.choices[0].message.content or "{}"
         except Exception as e:
             last_err = e
             if not _is_rate_limited(e) or attempt == MAX_RETRIES - 1:
-                logger.error(f"Groq API error for job {job.id}: {e}")
                 raise
-
             delay = _retry_after_seconds(e) or (0.6 * (2 ** attempt))
             delay = min(delay + random.uniform(0.1, 0.4), 8.0)
             logger.warning(
-                f"Groq 429 for job {job.id}, retry {attempt + 1}/{MAX_RETRIES - 1} in {delay:.2f}s"
+                f"Groq 429, retry {attempt + 1}/{MAX_RETRIES - 1} in {delay:.2f}s"
             )
             await asyncio.sleep(delay)
 
-    # Unreachable — the loop either returns or re-raises — but keep mypy happy.
     raise last_err  # type: ignore[misc]
 
 
+# ─── Public API ─────────────────────────────────────────────────────────────
+
+async def evaluate_job_async(config: JobConfig, job: JobResult) -> Dict[str, Any]:
+    """Score a single job (fallback path; batch is preferred)."""
+    prompt = build_job_prompt(config, job)
+    try:
+        raw = await _call_groq_with_retries(
+            messages=[
+                {"role": "system", "content": _SINGLE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=220,
+        )
+        return _parse_single(raw)
+    except Exception as e:
+        logger.error(f"Groq API error for job {job.id}: {e}")
+        raise
+
+
+async def evaluate_jobs_batch_async(
+    config: JobConfig,
+    jobs: Sequence[JobResult],
+) -> List[Dict[str, Any] | None]:
+    """Score up to DEFAULT_BATCH_SIZE jobs in a single Groq call.
+
+    Returns a list aligned with the input order. Entries for which the LLM
+    didn't return a result (rare, happens if the model omits one) are ``None``
+    and the caller can fall back to single-job evaluation for those.
+    """
+    if not jobs:
+        return []
+
+    prompt = _build_batch_prompt(config, jobs)
+    raw = await _call_groq_with_retries(
+        messages=[
+            {"role": "system", "content": _BATCH_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=160 * len(jobs) + 60,  # ~160 tokens per evaluation
+    )
+
+    by_idx = _parse_batch(raw, expected=len(jobs))
+    return [by_idx.get(i) for i in range(len(jobs))]
+
+
+# ─── Legacy sync single-job evaluator (kept for any non-async caller) ───────
+
 def evaluate_job(config: JobConfig, job: JobResult) -> Dict[str, Any]:
-    """Synchronous fallback. Retained for non-async callers; new code should use
-    ``evaluate_job_async`` which does not block the event loop."""
     if not GROQ_API_KEY or _client is None:
         raise ValueError("GROQ_API_KEY environment variable is not set")
 
     prompt = build_job_prompt(config, job)
-
     try:
         completion = _client.chat.completions.create(
             model=GROQ_MODEL,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": _SINGLE_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.2,
@@ -202,4 +288,4 @@ def evaluate_job(config: JobConfig, job: JobResult) -> Dict[str, Any]:
         logger.error(f"Groq API error for job {job.id}: {e}")
         raise
 
-    return _parse_completion(completion.choices[0].message.content)
+    return _parse_single(completion.choices[0].message.content)

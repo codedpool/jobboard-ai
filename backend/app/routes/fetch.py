@@ -8,15 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_clerk_auth
-from app.db.session import get_db
+from app.db.session import AsyncSessionLocal, get_db
 from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
 from app.services.quota import PAYMENT_FORM_URL, consume_search
-from app.services.github_fetcher import fetch_github_jobs
 from app.services.hn_fetcher import fetch_hn_jobs
+from app.services.jobspy_fetcher import fetch_jobspy_jobs
 from app.services.remoteok_fetcher import fetch_remoteok_jobs
-from app.services.remotive_fetcher import fetch_remotive_jobs
-from app.services.yc_fetcher import fetch_yc_jobs
+
+# JobSpy covers these four boards under one umbrella fetcher.
+_JOBSPY_SITES = {"linkedin", "indeed", "google", "glassdoor"}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["fetch"])
@@ -42,22 +43,37 @@ async def _fetch_platform_safe(
     platform: str,
     fetch_func,
     config: JobConfig,
-    db: AsyncSession,
+    _shared_db: AsyncSession,  # unused — kept for signature stability
 ) -> Tuple[List[JobResult], int, Optional[str]]:
+    """Run one fetcher with its own AsyncSession.
+
+    Fetchers flush writes to persist dedupe keys before the next fetcher looks
+    them up. Sharing a single session across fetchers running under
+    ``asyncio.gather()`` causes "Session is already flushing" races, so each
+    fetcher gets an isolated session and commits independently. Because we
+    build the session with ``expire_on_commit=False``, the returned ORM
+    instances are still safe to read after the session closes.
     """
-    Safely fetch jobs from a single platform with error handling.
-    Returns (results, skipped_count, error_message).
-    """
+    import time
+
+    logger.info(f"Fetching jobs from {platform}...")
+    start = time.time()
     try:
-        logger.info(f"Fetching jobs from {platform}...")
-        import time
-        start = time.time()
-        results, skipped = await fetch_func(config, db)
+        async with AsyncSessionLocal() as own_db:
+            try:
+                results, skipped = await fetch_func(config, own_db)
+                await own_db.commit()
+            except Exception:
+                await own_db.rollback()
+                raise
         elapsed = time.time() - start
-        logger.info(f"✓ {platform} completed in {elapsed:.2f}s: {len(results)} jobs, {skipped} skipped")
+        logger.info(
+            f"✓ {platform} completed in {elapsed:.2f}s: {len(results)} jobs, {skipped} skipped"
+        )
         return results, skipped, None
     except Exception as e:
-        error_msg = f"{platform} failed: {str(e)}"
+        elapsed = time.time() - start
+        error_msg = f"{platform} failed after {elapsed:.2f}s: {e}"
         logger.warning(error_msg, exc_info=True)
         return [], 0, error_msg
 
@@ -105,59 +121,86 @@ async def fetch_jobs_for_config(
             },
         )
 
-    # Determine which platforms to fetch from
-    selected_platforms = []
+    # Determine which platforms to fetch from. We surface JobSpy's sub-sites
+    # (linkedin/indeed/google/glassdoor) as if they were first-class platforms
+    # so the existing platform picker keeps working unchanged.
+    NEW_DEFAULTS = ["linkedin", "indeed", "google", "glassdoor", "remoteok", "hn"]
+    LEGACY_ONLY = {"remoteok", "remotive", "github", "hn", "yc"}
+
+    selected_platforms: list[str] = []
     if platforms:
-        # Parse comma-separated platforms from query parameter
+        # Explicit per-request override from the picker dialog always wins.
         selected_platforms = [p.strip().lower() for p in platforms.split(",")]
     elif config.platforms:
-        # Use platforms from config if available
-        selected_platforms = [p.lower() for p in config.platforms]
+        stored = [p.lower() for p in config.platforms]
+        # Migrate pre-JobSpy configs on the fly: if every stored platform is a
+        # legacy-only source, fall back to the new defaults so the user gets
+        # JobSpy coverage without having to re-create their agent.
+        if set(stored) <= LEGACY_ONLY:
+            logger.info(
+                f"Upgrading legacy-only platforms {stored!r} → JobSpy-inclusive defaults"
+            )
+            selected_platforms = list(NEW_DEFAULTS)
+        else:
+            selected_platforms = stored
     else:
-        # Default to all platforms
-        selected_platforms = ["remoteok", "remotive", "github", "hn", "yc"]
+        selected_platforms = list(NEW_DEFAULTS)
 
-    # Initialize all counts/skipped to 0
-    counts = {}
-    skipped = {}
-    for p in ["remoteok", "remotive", "hn", "github", "yc"]:
-        counts[p] = 0
-        skipped[p] = 0
+    all_known = ["linkedin", "indeed", "google", "glassdoor", "remoteok", "hn"]
+    counts = {p: 0 for p in all_known}
+    skipped = {p: 0 for p in all_known}
 
-    # Create parallel fetch tasks for selected platforms
     tasks = []
-    platform_order = []
+    platform_order: list[str] = []
+
+    # JobSpy — run one call covering whichever of its sites the user picked.
+    selected_jobspy = [s for s in selected_platforms if s in _JOBSPY_SITES]
+    if selected_jobspy:
+        platform_order.append("jobspy")
+        sites_for_task = list(selected_jobspy)  # snapshot for the closure
+
+        async def _jobspy_fetch(cfg, task_db):
+            return await fetch_jobspy_jobs(cfg, task_db, sites=sites_for_task)
+
+        tasks.append(
+            _fetch_platform_safe(
+                "jobspy:" + ",".join(sites_for_task),
+                _jobspy_fetch,
+                config,
+                db,
+            )
+        )
 
     if "remoteok" in selected_platforms:
         tasks.append(_fetch_platform_safe("remoteok", fetch_remoteok_jobs, config, db))
         platform_order.append("remoteok")
 
-    if "remotive" in selected_platforms:
-        tasks.append(_fetch_platform_safe("remotive", fetch_remotive_jobs, config, db))
-        platform_order.append("remotive")
-
     if "hn" in selected_platforms or "hackernews" in selected_platforms:
         tasks.append(_fetch_platform_safe("hn", fetch_hn_jobs, config, db))
         platform_order.append("hn")
-
-    if "github" in selected_platforms:
-        tasks.append(_fetch_platform_safe("github", fetch_github_jobs, config, db))
-        platform_order.append("github")
-
-    if "yc" in selected_platforms or "ycombinator" in selected_platforms:
-        tasks.append(_fetch_platform_safe("yc", fetch_yc_jobs, config, db))
-        platform_order.append("yc")
 
     # Run all fetchers in parallel
     logger.info(f"Starting parallel fetch for: {', '.join(platform_order)}")
     results = await asyncio.gather(*tasks)
 
-    # Aggregate results
+    # Aggregate results. JobSpy returns jobs with a per-row `source` (the actual
+    # board), so we bucket its counts by `source` rather than by the umbrella
+    # platform name.
     all_results: List[JobResult] = []
     for idx, (platform_results, platform_skipped, error_msg) in enumerate(results):
         platform_name = platform_order[idx]
-        counts[platform_name] = len(platform_results)
-        skipped[platform_name] = platform_skipped
+        if platform_name == "jobspy":
+            for job in platform_results:
+                src = (job.source or "").lower()
+                if src in counts:
+                    counts[src] += 1
+            # We don't know the per-site skip split; attribute to "linkedin"
+            # as a proxy since it's the dominant source. (Informational only.)
+            if platform_skipped and "linkedin" in counts:
+                skipped["linkedin"] += platform_skipped
+        else:
+            counts[platform_name] = len(platform_results)
+            skipped[platform_name] = platform_skipped
         all_results.extend(platform_results)
 
     await db.commit()

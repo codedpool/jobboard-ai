@@ -13,36 +13,58 @@ from app.auth.deps import get_clerk_auth
 from app.db.session import get_db
 from app.models.job_config import JobConfig
 from app.models.job_result import JobResult
-from app.services.job_evaluator import evaluate_job_async
+from app.services.filters import title_matches_seniority
+from app.services.job_evaluator import (
+    DEFAULT_BATCH_SIZE,
+    evaluate_job_async,
+    evaluate_jobs_batch_async,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/configs", tags=["evaluation"])
 
-# Tune-able: how many concurrent Groq calls per request.
-# On the free tier (30k TPM), 5 concurrent calls stays under the token budget
-# even when all jobs have long descriptions. Bump via GROQ_EVAL_CONCURRENCY.
-EVAL_CONCURRENCY = int(os.getenv("GROQ_EVAL_CONCURRENCY", "5"))
+# Parallel Groq calls per request. Each call now scores BATCH_SIZE jobs at
+# once, so effective throughput is CONCURRENCY × BATCH_SIZE jobs/second.
+EVAL_CONCURRENCY = int(os.getenv("GROQ_EVAL_CONCURRENCY", "3"))
+EVAL_BATCH_SIZE = int(os.getenv("GROQ_EVAL_BATCH_SIZE", str(DEFAULT_BATCH_SIZE)))
 
 
-async def _score_one(
+def _chunks(seq, size):
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+async def _score_batch(
     sem: asyncio.Semaphore,
     config: JobConfig,
-    job: JobResult,
-) -> tuple[JobResult, Optional[dict], Optional[str]]:
-    """Return (job, result, error). Errors are captured, not raised,
-    so one failure doesn't abort the whole batch."""
+    batch: list[JobResult],
+) -> list[tuple[JobResult, Optional[dict]]]:
+    """Score one batch. If the batch call fails entirely, fall back to
+    single-job scoring so one bad batch doesn't tank the whole request."""
     async with sem:
         try:
-            result = await evaluate_job_async(config, job)
-            return job, result, None
-        except Exception as exc:
-            return job, None, str(exc)
+            results = await evaluate_jobs_batch_async(config, batch)
+        except Exception as e:
+            logger.warning(f"Batch eval failed ({e}); falling back to singletons.")
+            results = [None] * len(batch)
+
+        # Fill any missing slots via single-job evaluation.
+        out: list[tuple[JobResult, Optional[dict]]] = []
+        for job, res in zip(batch, results):
+            if res is None:
+                try:
+                    res = await evaluate_job_async(config, job)
+                except Exception as e:
+                    logger.error(f"Single eval failed for job {job.id}: {e}")
+                    res = None
+            out.append((job, res))
+        return out
 
 
 @router.post("/{config_id}/evaluate")
 async def evaluate_jobs_for_config(
     config_id: str,
-    limit: int = 20,
+    limit: int = 30,
     platforms: Optional[str] = Query(None),
     credentials: HTTPAuthorizationCredentials = Depends(get_clerk_auth),
     db: AsyncSession = Depends(get_db),
@@ -51,7 +73,6 @@ async def evaluate_jobs_for_config(
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token: no sub claim")
 
-    # Ensure config belongs to this user
     config_stmt = select(JobConfig).where(
         JobConfig.id == config_id, JobConfig.user_id == user_id
     )
@@ -67,7 +88,7 @@ async def evaluate_jobs_for_config(
     elif config.platforms:
         selected_platforms = [p.lower() for p in config.platforms]
 
-    # Select unevaluated jobs for this config
+    # Pull the freshest unevaluated jobs first.
     jobs_query = (
         select(JobResult)
         .where(JobResult.config_id == config.id, JobResult.score.is_(None))
@@ -80,6 +101,17 @@ async def evaluate_jobs_for_config(
     jobs_result = await db.execute(jobs_query)
     jobs = list(jobs_result.scalars().all())
 
+    # Hard seniority filter BEFORE the LLM so we don't waste tokens (or score
+    # floor) on senior roles returned for an intern query.
+    prefilter_count = len(jobs)
+    jobs = [j for j in jobs if title_matches_seniority(j.title or "", config.seniority)]
+    seniority_filtered = prefilter_count - len(jobs)
+    if seniority_filtered:
+        logger.info(
+            f"Seniority filter dropped {seniority_filtered}/{prefilter_count} "
+            f"jobs (seniority={config.seniority})"
+        )
+
     if not jobs:
         return {
             "config_id": str(config.id),
@@ -88,40 +120,44 @@ async def evaluate_jobs_for_config(
             "errors": 0,
             "job_ids": [],
             "elapsed_ms": 0,
+            "seniority_filtered": seniority_filtered,
         }
 
     start = time.perf_counter()
     sem = asyncio.Semaphore(max(1, EVAL_CONCURRENCY))
+    batches = list(_chunks(jobs, EVAL_BATCH_SIZE))
     logger.info(
-        f"Evaluating {len(jobs)} jobs for config {config.id} "
+        f"Evaluating {len(jobs)} jobs for config {config.id} in "
+        f"{len(batches)} batches of ≤{EVAL_BATCH_SIZE} "
         f"with concurrency={EVAL_CONCURRENCY}"
     )
 
-    outcomes = await asyncio.gather(
-        *(_score_one(sem, config, job) for job in jobs),
-        return_exceptions=False,
-    )
+    grouped = await asyncio.gather(*(_score_batch(sem, config, b) for b in batches))
 
     evaluated = 0
     errors = 0
     updated_job_ids: list[str] = []
 
-    for job, result, error in outcomes:
-        if error or result is None:
-            logger.error(f"Failed to evaluate job {job.id}: {error}")
-            errors += 1
-            continue
-        job.score = result["score"]
-        job.reason = result["reason"]
-        evaluated += 1
-        updated_job_ids.append(str(job.id))
+    for group in grouped:
+        for job, res in group:
+            if res is None:
+                errors += 1
+                continue
+            job.score = res["score"]
+            job.reason = res["reason"]
+            matches = res.get("matches") or {}
+            job.skills_match = matches.get("skills_match")
+            job.seniority_match = matches.get("seniority_match")
+            job.location_match = matches.get("location_match")
+            evaluated += 1
+            updated_job_ids.append(str(job.id))
 
     await db.commit()
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     logger.info(
         f"✓ evaluated {evaluated}/{len(jobs)} jobs "
-        f"({errors} errors) in {elapsed_ms}ms"
+        f"({errors} errors) in {elapsed_ms}ms via batch-of-{EVAL_BATCH_SIZE}"
     )
 
     return {
@@ -131,4 +167,5 @@ async def evaluate_jobs_for_config(
         "errors": errors,
         "job_ids": updated_job_ids,
         "elapsed_ms": elapsed_ms,
+        "seniority_filtered": seniority_filtered,
     }
